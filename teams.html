@@ -1,0 +1,94 @@
+<style>
+    .team-box { background: white; border-radius: 15px; padding: 15px; margin: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+    .player-card { display: inline-flex; flex-direction: column; align-items: center; margin: 5px; }
+    .player-img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; border: 2px solid #007AFF; }
+    .slot-empty { width: 50px; height: 50px; border-radius: 50%; border: 2px dashed #ccc; display: flex; align-items: center; justify-content: center; color: #ccc; }
+</style>
+
+<div id="teamsContainer" style="direction: rtl; padding: 20px;">
+    <h2>🏆 تشكيل الفرق</h2>
+    <div id="teamList"></div>
+    <hr>
+    <h3>👥 لاعبين متاحين للانضمام:</h3>
+    <div id="availablePlayers" style="display: flex; flex-wrap: wrap; gap: 15px;"></div>
+</div>
+
+<script type="module">
+    import { db } from './config.js';
+    import { collection, onSnapshot, doc, updateDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    // إعدادات الإدارة (يمكنك نقلها لـ Firestore لاحقاً)
+    const TEAM_LIMIT = 5; // الحد الأقصى لكل فريق
+    const TEAMS_COUNT = 4; // عدد الفرق المتاحة
+
+    function loadData() {
+        // 1. جلب اللاعبين وتوزيعهم
+        onSnapshot(collection(db, "Players"), (snap) => {
+            const players = [];
+            snap.forEach(d => players.push({id: d.id, ...d.data()}));
+            
+            renderTeams(players);
+            renderAvailable(players);
+        });
+    }
+
+    function renderTeams(allPlayers) {
+        let html = "";
+        for(let i = 1; i <= TEAMS_COUNT; i++) {
+            const teamPlayers = allPlayers.filter(p => p.teamId == i);
+            html += `
+                <div class="team-box">
+                    <div style="display:flex; justify-content:space-between;">
+                        <b>الفريق ${i} (${teamPlayers.length}/${TEAM_LIMIT})</b>
+                        ${teamPlayers.length < TEAM_LIMIT ? `<button onclick="joinTeam(${i})">انضمام</button>` : '<span style="color:red">مكتمل</span>'}
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; margin-top:10px;">
+                        ${teamPlayers.map(p => `
+                            <div class="player-card">
+                                <img src="${p.photo}" class="player-img">
+                                <span style="font-size:10px;">${p.name}</span>
+                            </div>
+                        `).join('')}
+                        ${renderEmptySlots(TEAM_LIMIT - teamPlayers.length)}
+                    </div>
+                </div>
+            `;
+        }
+        document.getElementById('teamList').innerHTML = html;
+    }
+
+    function renderEmptySlots(count) {
+        let slots = "";
+        for(let i=0; i<count; i++) slots += `<div class="player-card"><div class="slot-empty">؟</div></div>`;
+        return slots;
+    }
+
+    function renderAvailable(allPlayers) {
+        const available = allPlayers.filter(p => !p.teamId);
+        document.getElementById('availablePlayers').innerHTML = available.map(p => `
+            <div class="player-card" onclick="selectMe('${p.id}', '${p.name}')">
+                <img src="${p.photo}" class="player-img">
+                <span style="font-size:12px;">${p.name}</span>
+            </div>
+        `).join('');
+    }
+
+    // منطق الاختيار
+    let selectedPlayerId = null;
+    window.selectMe = (id, name) => {
+        selectedPlayerId = id;
+        alert("تم اختيار: " + name + " - الآن اضغط على 'انضمام' في الفريق الذي تريده");
+    }
+
+    window.joinTeam = async (teamId) => {
+        if(!selectedPlayerId) return alert("يرجى اختيار اسمك من قائمة اللاعبين المتاحين أولاً");
+        
+        await updateDoc(doc(db, "Players", selectedPlayerId), {
+            teamId: teamId
+        });
+        selectedPlayerId = null;
+        alert("تم الانضمام للفريق بنجاح!");
+    }
+
+    loadData();
+</script>
