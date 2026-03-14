@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>منصة العائلة | الانضمام للفرق</title>
+    <style>
+        :root {
+            --ios-blue: #007AFF;
+            --ios-bg: #F2F2F7;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--ios-bg);
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            direction: rtl;
+        }
+
+        .main-card {
+            background: white;
+            padding: 40px 20px;
+            border-radius: 30px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .logo-area {
+            font-size: 50px;
+            margin-bottom: 20px;
+        }
+
+        .welcome-text h1 {
+            font-size: 24px;
+            color: #1c1c1e;
+            margin-bottom: 10px;
+        }
+
+        .welcome-text p {
+            color: #8e8e93;
+            font-size: 14px;
+            margin-bottom: 35px;
+            line-height: 1.5;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .btn {
+            padding: 16px;
+            border-radius: 15px;
+            font-size: 16px;
+            font-weight: 700;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            display: block;
+        }
+
+        /* زر التسجيل */
+        .btn-register {
+            background-color: var(--ios-blue);
+            color: white;
+            box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+        }
+
+        .btn-register:active {
+            transform: scale(0.97);
+            background-color: #0062cc;
+        }
+
+        /* زر الدخول */
+        .btn-login {
+            background-color: #E5E5EA;
+            color: #1c1c1e;
+        }
+
+        .btn-login:active {
+            transform: scale(0.97);
+            background-color: #d1d1d6;
+        }
+
+        .footer-note {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #aeaeb2;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-card">
+        <div class="logo-area">🏆</div>
+        
+        <div class="welcome-text">
+            <h1>تشكيل فرق العائلة</h1>
+            <p>أهلاً بك في منصة تنظيم الفرق. يمكنك التسجيل كلاعب جديد أو الدخول لاختيار فريقك الحالي.</p>
+        </div>
+
+        <div class="btn-group">
+            <a href="register.html" class="btn btn-register">📝 سجل لاعب جديد</a>
+            
+            <a href="login.html" class="btn btn-login">🔑 دخول لاختيار الفريق</a>
+        </div>
+
+        <div class="footer-note">
+            جميع الحقوق محفوظة - منصة العائلة 2026
+        </div>
+    </div>
+
+</body>
+</html>
