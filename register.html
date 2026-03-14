@@ -1,0 +1,25 @@
+<div class="reg-container" style="padding: 20px; text-align: center; direction: rtl;">
+    <h3>📝 تسجيل لاعب جديد</h3>
+    <input type="text" id="regName" placeholder="الاسم الكامل" style="width: 80%; padding: 10px; margin-bottom: 10px;">
+    <input type="text" id="regImg" placeholder="رابط صورتك الشخصية" style="width: 80%; padding: 10px; margin-bottom: 20px;">
+    <button onclick="registerPlayer()" style="background: #007AFF; color: white; border: none; padding: 10px 30px; border-radius: 10px;">تسجيل</button>
+</div>
+
+<script type="module">
+    import { db } from './config.js';
+    import { collection, addDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    window.registerPlayer = async () => {
+        const name = document.getElementById('regName').value;
+        const img = document.getElementById('regImg').value;
+        if(!name) return alert("يرجى كتابة الاسم");
+
+        await addDoc(collection(db, "Players"), {
+            name: name,
+            photo: img || 'https://via.placeholder.com/100',
+            teamId: null // لم يختبر فريقاً بعد
+        });
+        alert("تم التسجيل بنجاح!");
+        window.location.href = "teams.html";
+    };
+</script>
