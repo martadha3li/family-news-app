@@ -1,94 +1,265 @@
-<style>
-    .team-box { background: white; border-radius: 15px; padding: 15px; margin: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-    .player-card { display: inline-flex; flex-direction: column; align-items: center; margin: 5px; }
-    .player-img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; border: 2px solid #007AFF; }
-    .slot-empty { width: 50px; height: 50px; border-radius: 50%; border: 2px dashed #ccc; display: flex; align-items: center; justify-content: center; color: #ccc; }
-</style>
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>توزيع الفرق | منصة العائلة</title>
+    <style>
+        :root {
+            --ios-blue: #007AFF;
+            --ios-bg: #F2F2F7;
+            --card-bg: #FFFFFF;
+        }
 
-<div id="teamsContainer" style="direction: rtl; padding: 20px;">
-    <h2>🏆 تشكيل الفرق</h2>
-    <div id="teamList"></div>
-    <hr>
-    <h3>👥 لاعبين متاحين للانضمام:</h3>
-    <div id="availablePlayers" style="display: flex; flex-wrap: wrap; gap: 15px;"></div>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--ios-bg);
+            margin: 0;
+            padding: 20px;
+            direction: rtl;
+        }
+
+        .container { max-width: 600px; margin: auto; }
+
+        /* ترويسة الصفحة */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            background: white;
+            padding: 15px;
+            border-radius: 18px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+
+        .user-badge { display: flex; align-items: center; gap: 10px; }
+        .user-badge img { width: 35px; height: 35px; border-radius: 50%; border: 2px solid var(--ios-blue); }
+
+        /* تصميم كرت الفريق */
+        .team-card {
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+            border: 0.5px solid #d1d1d6;
+        }
+
+        .team-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #f2f2f7;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        .team-title { font-weight: 800; font-size: 18px; color: #1c1c1e; }
+        
+        .join-btn {
+            background: var(--ios-blue);
+            color: white;
+            border: none;
+            padding: 8px 18px;
+            border-radius: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .join-btn:disabled { background: #aeaeb2; cursor: not-allowed; }
+
+        /* شبكة اللاعبين داخل الفريق */
+        .players-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .player-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .player-img {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #e5e5ea;
+            background: #f2f2f7;
+        }
+
+        .player-name {
+            font-size: 11px;
+            margin-top: 5px;
+            font-weight: 600;
+            color: #3a3a3c;
+            max-width: 60px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .empty-slot {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: 2px dashed #d1d1d6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #d1d1d6;
+            font-size: 20px;
+        }
+
+        /* اللاعبون المتاحون */
+        .available-section {
+            margin-top: 30px;
+            background: #e5e5ea;
+            padding: 15px;
+            border-radius: 20px;
+        }
+
+        .logout-link { color: #FF3B30; font-size: 13px; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div class="user-badge" id="myProfile">
+            <span id="welcomeName">جاري التحميل...</span>
+        </div>
+        <a href="#" onclick="logout()" class="logout-link">خروج</a>
+    </div>
+
+    <div id="teamsList">
+        </div>
+
+    <div class="available-section">
+        <h4 style="margin: 0 0 15px 0;">👥 لاعبون في انتظار الانضمام:</h4>
+        <div id="availablePlayers" class="players-grid">
+            </div>
+    </div>
 </div>
 
 <script type="module">
     import { db } from './config.js';
-    import { collection, onSnapshot, doc, updateDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { collection, onSnapshot, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-    // إعدادات الإدارة (يمكنك نقلها لـ Firestore لاحقاً)
-    const TEAM_LIMIT = 5; // الحد الأقصى لكل فريق
-    const TEAMS_COUNT = 4; // عدد الفرق المتاحة
+    // إعدادات الفرق
+    const TEAM_LIMIT = 5; // عدد اللاعبين في كل فريق
+    const TEAMS_COUNT = 4; // عدد الفرق الإجمالي
 
-    function loadData() {
-        // 1. جلب اللاعبين وتوزيعهم
+    // بيانات المستخدم الحالي
+    const myId = localStorage.getItem('currentPlayerId');
+    const myName = localStorage.getItem('currentPlayerName');
+
+    if (!myId) {
+        window.location.href = "login.html";
+    }
+
+    document.getElementById('welcomeName').innerText = "أهلاً، " + myName;
+
+    function init() {
+        // مراقبة حية لجميع اللاعبين
         onSnapshot(collection(db, "Players"), (snap) => {
-            const players = [];
-            snap.forEach(d => players.push({id: d.id, ...d.data()}));
+            const allPlayers = [];
+            snap.forEach(d => allPlayers.push({ id: d.id, ...d.data() }));
             
-            renderTeams(players);
-            renderAvailable(players);
+            renderTeams(allPlayers);
+            renderAvailable(allPlayers);
         });
     }
 
-    function renderTeams(allPlayers) {
-        let html = "";
-        for(let i = 1; i <= TEAMS_COUNT; i++) {
-            const teamPlayers = allPlayers.filter(p => p.teamId == i);
-            html += `
-                <div class="team-box">
-                    <div style="display:flex; justify-content:space-between;">
-                        <b>الفريق ${i} (${teamPlayers.length}/${TEAM_LIMIT})</b>
-                        ${teamPlayers.length < TEAM_LIMIT ? `<button onclick="joinTeam(${i})">انضمام</button>` : '<span style="color:red">مكتمل</span>'}
-                    </div>
-                    <div style="display:flex; flex-wrap:wrap; margin-top:10px;">
-                        ${teamPlayers.map(p => `
-                            <div class="player-card">
-                                <img src="${p.photo}" class="player-img">
-                                <span style="font-size:10px;">${p.name}</span>
-                            </div>
-                        `).join('')}
-                        ${renderEmptySlots(TEAM_LIMIT - teamPlayers.length)}
-                    </div>
+    function renderTeams(players) {
+        const teamsList = document.getElementById('teamsList');
+        teamsList.innerHTML = "";
+
+        // العثور على فريق اللاعب الحالي (إذا كان منضماً)
+        const myPlayer = players.find(p => p.id === myId);
+        const myCurrentTeam = myPlayer ? myPlayer.teamId : null;
+
+        for (let i = 1; i <= TEAMS_COUNT; i++) {
+            const teamPlayers = players.filter(p => p.teamId == i);
+            const isFull = teamPlayers.length >= TEAM_LIMIT;
+            const amIInThisTeam = myCurrentTeam == i;
+
+            const card = document.createElement('div');
+            card.className = "team-card";
+            card.innerHTML = `
+                <div class="team-header">
+                    <span class="team-title">الفريق ${i}</span>
+                    <span style="font-size:12px; color:#8e8e93;">${teamPlayers.length} / ${TEAM_LIMIT}</span>
+                    ${amIInThisTeam ? 
+                        `<span style="color:var(--ios-blue); font-weight:bold; font-size:13px;">فريقك الحالي ✓</span>` : 
+                        `<button class="join-btn" onclick="joinTeam(${i})" ${isFull ? 'disabled' : ''}>
+                            ${isFull ? 'مكتمل' : 'انضمام'}
+                        </button>`
+                    }
+                </div>
+                <div class="players-grid">
+                    ${teamPlayers.map(p => `
+                        <div class="player-item">
+                            <img src="${p.photo || 'https://via.placeholder.com/50'}" class="player-img">
+                            <span class="player-name">${p.name} ${p.id === myId ? '(أنت)' : ''}</span>
+                        </div>
+                    `).join('')}
+                    ${renderEmptySlots(TEAM_LIMIT - teamPlayers.length)}
                 </div>
             `;
+            teamsList.appendChild(card);
         }
-        document.getElementById('teamList').innerHTML = html;
     }
 
     function renderEmptySlots(count) {
-        let slots = "";
-        for(let i=0; i<count; i++) slots += `<div class="player-card"><div class="slot-empty">؟</div></div>`;
-        return slots;
+        let html = "";
+        for (let i = 0; i < count; i++) {
+            html += `<div class="player-item"><div class="empty-slot">?</div></div>`;
+        }
+        return html;
     }
 
-    function renderAvailable(allPlayers) {
-        const available = allPlayers.filter(p => !p.teamId);
-        document.getElementById('availablePlayers').innerHTML = available.map(p => `
-            <div class="player-card" onclick="selectMe('${p.id}', '${p.name}')">
-                <img src="${p.photo}" class="player-img">
-                <span style="font-size:12px;">${p.name}</span>
+    function renderAvailable(players) {
+        const availableArea = document.getElementById('availablePlayers');
+        const available = players.filter(p => !p.teamId);
+        
+        if(available.length === 0) {
+            availableArea.innerHTML = "<p style='grid-column: span 4; font-size:12px; color:#8e8e93; text-align:center;'>الجميع انضموا للفرق! 🎉</p>";
+            return;
+        }
+
+        availableArea.innerHTML = available.map(p => `
+            <div class="player-item">
+                <img src="${p.photo || 'https://via.placeholder.com/50'}" class="player-img" style="border-color:#d1d1d6">
+                <span class="player-name">${p.name}</span>
             </div>
         `).join('');
     }
 
-    // منطق الاختيار
-    let selectedPlayerId = null;
-    window.selectMe = (id, name) => {
-        selectedPlayerId = id;
-        alert("تم اختيار: " + name + " - الآن اضغط على 'انضمام' في الفريق الذي تريده");
-    }
-
     window.joinTeam = async (teamId) => {
-        if(!selectedPlayerId) return alert("يرجى اختيار اسمك من قائمة اللاعبين المتاحين أولاً");
-        
-        await updateDoc(doc(db, "Players", selectedPlayerId), {
-            teamId: teamId
-        });
-        selectedPlayerId = null;
-        alert("تم الانضمام للفريق بنجاح!");
-    }
+        try {
+            const playerRef = doc(db, "Players", myId);
+            await updateDoc(playerRef, {
+                teamId: teamId
+            });
+            alert("تم انضمامك للفريق بنجاح!");
+        } catch (error) {
+            console.error("Error joining team:", error);
+            alert("حدث خطأ أثناء الانضمام");
+        }
+    };
 
-    loadData();
+    window.logout = () => {
+        localStorage.clear();
+        window.location.href = "login.html";
+    };
+
+    init();
 </script>
+
+</body>
+</html>
