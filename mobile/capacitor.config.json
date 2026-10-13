@@ -1,0 +1,17 @@
+{
+  "appId": "com.martadha3li.familynews",
+  "appName": "أخبار العائلة",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#f6f7f2"
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#f6f7f2"
+  }
+}

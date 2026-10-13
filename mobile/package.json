@@ -1,0 +1,20 @@
+{
+  "name": "family-news-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Android and iOS package for the family news application",
+  "scripts": {
+    "prepare:web": "node scripts/prepare-web.mjs",
+    "check": "node --check www/app.js && node --check scripts/prepare-web.mjs",
+    "android": "npm run prepare:web && cap sync android",
+    "ios": "npm run prepare:web && cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.5.3",
+    "@capacitor/android": "8.5.3",
+    "@capacitor/ios": "8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  }
+}
