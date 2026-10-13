@@ -1,0 +1,28 @@
+-- Apply after community-schema.sql. All private tables deny direct client access.
+begin;
+alter table public.family_settings add column allow_groups boolean not null default true,add column endorsements_enabled boolean not null default false;
+alter table public.announcements add column category text not null default 'general' check(category in('wedding','death','commercial','general','urgent','donation'));
+alter table public.profiles add column avatar_path text check(avatar_path is null or avatar_path like id::text||'/%');
+create table family_private.chat_groups(id uuid primary key default gen_random_uuid(),owner_id uuid not null references public.profiles(id),title text not null check(char_length(title) between 3 and 100),kind text not null check(kind in('group','event')),starts_at timestamptz,ends_at timestamptz,created_at timestamptz not null default now(),check(kind='group' or (starts_at is not null and ends_at>starts_at)));
+create table family_private.group_members(group_id uuid not null references family_private.chat_groups(id) on delete cascade,member_id uuid not null references public.profiles(id),primary key(group_id,member_id));
+create index group_members_member on family_private.group_members(member_id,group_id);
+alter table family_private.chat_messages add column group_id uuid references family_private.chat_groups(id) on delete cascade,add constraint message_one_room check(not(thread_id is not null and group_id is not null));
+create index messages_group_recent on family_private.chat_messages(group_id,id desc) where group_id is not null;
+create table family_private.phone_requests(id uuid primary key default gen_random_uuid(),member_id uuid not null references public.profiles(id),new_phone text not null check(new_phone ~ '^\+[1-9][0-9]{7,14}$'),status text not null default 'pending' check(status in('pending','approved','rejected')),created_at timestamptz not null default now());
+create unique index phone_request_pending on family_private.phone_requests(member_id) where status='pending';
+create table family_private.endorsements(id uuid primary key default gen_random_uuid(),applicant_id uuid not null references public.profiles(id),sponsor_id uuid not null references public.profiles(id),status text not null default 'pending' check(status in('pending','approved','rejected')),created_at timestamptz not null default now(),decided_at timestamptz,check(applicant_id<>sponsor_id),unique(applicant_id,sponsor_id));
+create index endorsements_sponsor_pending on family_private.endorsements(sponsor_id,status,created_at desc);
+create index endorsements_applicant on family_private.endorsements(applicant_id,status);
+alter table family_private.chat_groups enable row level security;
+alter table family_private.group_members enable row level security;
+alter table family_private.phone_requests enable row level security;
+alter table family_private.endorsements enable row level security;
+create policy groups_deny_direct on family_private.chat_groups for all to authenticated using(false) with check(false);
+create policy group_members_deny_direct on family_private.group_members for all to authenticated using(false) with check(false);
+create policy phone_requests_deny_direct on family_private.phone_requests for all to authenticated using(false) with check(false);
+create policy endorsements_deny_direct on family_private.endorsements for all to authenticated using(false) with check(false);
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values('profile-images','profile-images',false,204800,array['image/jpeg','image/png','image/webp']);
+create policy profile_image_read on storage.objects for select to authenticated using(bucket_id='profile-images' and ((select public.my_role()) is not null or (storage.foldername(name))[1]=(select auth.uid())::text));
+create policy profile_image_insert on storage.objects for insert to authenticated with check(bucket_id='profile-images' and (storage.foldername(name))[1]=(select auth.uid())::text);
+create policy profile_image_delete on storage.objects for delete to authenticated using(bucket_id='profile-images' and (storage.foldername(name))[1]=(select auth.uid())::text);
+commit;
