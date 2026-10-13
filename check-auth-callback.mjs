@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {readAuthCallback} from './dist/auth-callback.mjs';
+assert.equal(readAuthCallback(''),null);
+assert.match(readAuthCallback('#error=access_denied&error_code=otp_expired').error,/انتهت/);
+assert.match(readAuthCallback('#access_token=synthetic').error,/غير مكتمل/);
+assert.match(readAuthCallback('#access_token=synthetic&refresh_token=synthetic&expires_in=-1').error,/انتهت/);
+const session=readAuthCallback('#access_token=synthetic-access&refresh_token=synthetic-refresh&expires_in=3600',1000).session;
+assert.equal(session.expires_at,4600);
+assert.equal(session.refresh_token,'synthetic-refresh');
+console.log('Auth callback checks: PASS');
