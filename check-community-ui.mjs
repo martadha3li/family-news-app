@@ -36,7 +36,7 @@ $('tab-signup').click();assert.equal($('signup-extra').hidden,false);assert.equa
 $('signup-gender').value='female';$('signup-gender').dispatchEvent(new window.Event('change'));assert.equal($('signup-reference').hidden,false);assert.equal($('signup-ref').required,true);
 $('tab-login').click();assert.equal($('signup-full').disabled,true);
 $('profile-open').click();await tick();assert.equal($('profile-dialog').open,true);assert.equal($('profile-gender').disabled,true);$('profile-close').click();
-$('chat-tab').click();await tick();assert.equal($('chat-section').hidden,false);assert.ok(requests.some(x=>x.includes('/rpc/chat_read')));
+$('chat-fab').click();await tick();assert.equal($('chat-section').hidden,false);assert.equal($('chat-fab').hidden,false);$('chat-public').click();await tick();assert.ok(document.querySelector('.chat-layout').classList.contains('has-room'));$('chat-back').click();assert.equal(document.querySelector('.chat-layout').classList.contains('has-room'),false);assert.ok(requests.some(x=>x.includes('/rpc/chat_read')));
 assert.ok($('chat-groups').textContent.includes('مجموعة الاختبار'));$('chat-groups').querySelector('button').click();await tick();assert.ok($('chat-messages').textContent.includes('رسالة المجموعة'));assert.equal($('group-info').hidden,false);
 $('settings-tab').click();await tick();assert.equal($('settings-section').hidden,false);assert.equal($('set-restrict_gender_chat').checked,true);assert.equal($('set-allow_groups').checked,true);assert.equal($('set-endorsements_enabled').checked,true);assert.ok($('phone-admin-list'));assert.ok($('email-new'));assert.ok($('avatar-file'));
 $('review-tab').click();await tick();assert.equal($('review-section').hidden,false);
