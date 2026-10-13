@@ -6,5 +6,5 @@ export function readAuthCallback(hash,now=Math.floor(Date.now()/1000)){
  if(!access||!refresh)return {error:'رابط الدخول غير مكتمل. اطلب رابطًا جديدًا.'};
  const expiry=Number(values.get('expires_in')||3600);
  if(!Number.isFinite(expiry)||expiry<=0)return {error:'انتهت صلاحية جلسة الدخول. اطلب رابطًا جديدًا.'};
- return {session:{access_token:access,refresh_token:refresh,expires_in:expiry,expires_at:now+expiry,token_type:'bearer'}};
+ return {recovery:values.get('type')==='recovery',session:{access_token:access,refresh_token:refresh,expires_in:expiry,expires_at:now+expiry,token_type:'bearer'}};
 }
