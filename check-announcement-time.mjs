@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {announcementState,announcementPeriod} from './dist/announcement-time.mjs';
+const ad={enabled:true,starts_at:'2026-10-13T08:00:00Z',ends_at:'2026-10-13T09:00:00Z'};
+assert.equal(announcementState(ad,Date.parse('2026-10-13T07:59:59Z')),'scheduled');
+assert.equal(announcementState(ad,Date.parse(ad.starts_at)),'active');
+assert.equal(announcementState(ad,Date.parse(ad.ends_at)-1),'active');
+assert.equal(announcementState(ad,Date.parse(ad.ends_at)),'expired');
+assert.equal(announcementState({...ad,enabled:false},Date.parse(ad.starts_at)),'disabled');
+assert.throws(()=>announcementPeriod(ad.ends_at,ad.starts_at));
+assert.deepEqual(announcementPeriod(ad.starts_at,ad.ends_at),{starts_at:'2026-10-13T08:00:00.000Z',ends_at:'2026-10-13T09:00:00.000Z'});
+console.log('Announcement schedule boundaries: PASS');
