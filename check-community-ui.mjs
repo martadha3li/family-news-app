@@ -20,6 +20,17 @@ await import('./dist/app.js');
 const tick=()=>new Promise(r=>setTimeout(r,20));await tick();
 const $=x=>document.getElementById(x);
 assert.equal($('app-screen').hidden,false);
+assert.equal($('news-section').hidden,false);
+assert.equal($('header-actions').hidden,false);
+assert.ok($('header-actions').contains($('profile-open')));
+assert.ok($('header-actions').contains($('logout')));
+$('menu-open').click();assert.equal($('nav-drawer').open,true);assert.equal($('menu-open').getAttribute('aria-expanded'),'true');
+$('chat-tab').click();await tick();assert.equal($('nav-drawer').open,false);
+$('new-post').click();assert.equal($('editor').open,true);assert.ok($('mention-picker'));
+$('mention-search').value='أحمد';$('mention-search').dispatchEvent(new window.Event('input'));await new Promise(r=>setTimeout(r,350));
+$('mention-results').querySelector('button').click();assert.ok($('mention-selected').textContent.includes('أحمد'));$('close-editor').click();
+$('mentioned-news-open').click();await tick();assert.ok(requests.some(x=>x.includes('mentioned_member_ids=cs.')));
+
 for(const x of ['chat','settings','review'])assert.ok($(x+'-tab'));
 $('tab-signup').click();assert.equal($('signup-extra').hidden,false);assert.equal($('signup-full').disabled,false);
 $('signup-gender').value='female';$('signup-gender').dispatchEvent(new window.Event('change'));assert.equal($('signup-reference').hidden,false);assert.equal($('signup-ref').required,true);
