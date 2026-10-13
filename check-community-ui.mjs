@@ -7,10 +7,12 @@ globalThis.setInterval=()=>0;window.HTMLDialogElement.prototype.showModal=functi
 const id='a2234d90-b03c-45dc-8a81-4c525d8864d9';
 localStorage.setItem('family-session',JSON.stringify({access_token:'test',refresh_token:'test',expires_at:Math.floor(Date.now()/1000)+3600}));
 const settings={id:true,chat_enabled:true,public_chat_enabled:true,private_chat_enabled:true,restrict_gender_chat:true,journalist_approval:true,auto_activate:true,allow_groups:true,endorsements_enabled:true};
-const requests=[];
-globalThis.fetch=async(url,options={})=>{requests.push(String(url));const u=new URL(url);let data=[];
+const requests=[],bodies=[];
+globalThis.fetch=async(url,options={})=>{requests.push(String(url));if(options.body&&typeof options.body==='string')bodies.push({url:String(url),body:JSON.parse(options.body)});const u=new URL(url);let data=[];
  if(u.pathname==='/auth/v1/user')data={id,email:'test@example.invalid'};
  else if(u.pathname==='/rest/v1/profiles')data=[{id,display_name:'أحمد علي حسن العائلة',role:'admin',status:'active',is_root:true}];
+ else if(u.pathname==='/rest/v1/kinship_options')data=[{code:'father',label:'أب',generation:-1,enabled:true,for_reference:true},{code:'brother',label:'أخ',generation:0,enabled:true,for_reference:true}];
+ else if(u.pathname==='/rest/v1/rpc/family_action'){const b=JSON.parse(options.body);if(b.action==='similar')data=[{id:'00000000-0000-0000-0000-000000000003',display_name:'حسن علي حسن العائلة',score:90}];}
  else if(u.pathname==='/rest/v1/family_settings')data=[settings];
  else if(u.pathname==='/rest/v1/rpc/profile_get')data={full_name:'أحمد علي حسن العائلة',phone:'+966500000000',gender:'male',status:'active',endorsements_enabled:true};
  if(u.pathname==='/rest/v1/rpc/group_action'){const b=JSON.parse(options.body);if(b.action==='list')data=[{id:'00000000-0000-0000-0000-000000000001',owner_id:id,title:'مجموعة الاختبار',kind:'group',open_now:true}];else if(b.action==='read')data=[{id:1,sender_id:id,display_name:'عضو الاختبار',body:'رسالة المجموعة',created_at:new Date().toISOString()}];}
@@ -40,5 +42,8 @@ $('chat-fab').click();await tick();assert.equal($('chat-section').hidden,false);
 assert.ok($('chat-groups').textContent.includes('مجموعة الاختبار'));$('chat-groups').querySelector('button').click();await tick();assert.ok($('chat-messages').textContent.includes('رسالة المجموعة'));assert.equal($('group-info').hidden,false);
 $('settings-tab').click();await tick();assert.equal($('settings-section').hidden,false);assert.equal($('set-restrict_gender_chat').checked,true);assert.equal($('set-allow_groups').checked,true);assert.equal($('set-endorsements_enabled').checked,true);assert.ok($('phone-admin-list'));assert.ok($('email-new'));assert.ok($('avatar-file'));
 $('review-tab').click();await tick();assert.equal($('review-section').hidden,false);
+$('family-tree-open').click();await tick();assert.ok(document.querySelector('.family-dialog').textContent.includes('90'));assert.ok($('kinship-admin'));assert.equal($('profile-relation').options[1].textContent,'أب');
+$('chat-fab').click();await tick();$('chat-search').value='أ';$('chat-search').dispatchEvent(new window.Event('input'));await new Promise(r=>setTimeout(r,400));assert.ok(bodies.some(x=>x.url.includes('/rpc/chat_search')&&x.body.term==='أ'));
+$('chat-groups').querySelector('button').click();await tick();$('chat-messages').querySelector('.message-options').click();await tick();const reply=[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='↩ الرد');assert.ok(reply);reply.click();assert.equal($('chat-reply-preview').hidden,false);$('chat-public').click();await tick();assert.equal($('chat-reply-preview').hidden,true);
 console.log('PASS: application startup, account dialog, signup gender fields, chat/settings/review navigation.');
 process.exit(0);

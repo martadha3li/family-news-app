@@ -5,6 +5,10 @@ root=Path(__file__).resolve().parents[1]
 icon=Image.open(root/'www/icon-512.png').convert('RGB')
 android=root/'android/app/src/main/res'
 if android.exists():
+ manifest=root/'android/app/src/main/AndroidManifest.xml'
+ manifest_text=manifest.read_text()
+ if 'android.permission.RECORD_AUDIO' not in manifest_text:manifest_text=manifest_text.replace('</manifest>','<uses-permission android:name="android.permission.RECORD_AUDIO" /><uses-feature android:name="android.hardware.microphone" android:required="false" /></manifest>')
+ manifest.write_text(manifest_text)
  gradle=root/'android/app/build.gradle'
  text=gradle.read_text().replace('versionCode 1','versionCode 3').replace('versionName "1.0"','versionName "1.2.0"');gradle.write_text(text)
  for density,size in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
@@ -19,6 +23,7 @@ if ios.exists():
  settings['CFBundleShortVersionString']='1.2.0'
  settings['CFBundleVersion']='3'
  settings['NSPhotoLibraryUsageDescription']='اختيار صورة لإرفاقها بخبر في أخبار العائلة.'
+ settings['NSMicrophoneUsageDescription']='تسجيل رسالة صوتية وإرسالها إلى محادثة تختارها في أخبار العائلة.'
  settings['NSCameraUsageDescription']='التقاط صورة لإرفاقها بخبر في أخبار العائلة.'
  settings['NSPhotoLibraryAddUsageDescription']='حفظ صورة تختارها من أخبار العائلة.'
  p.write_bytes(plistlib.dumps(settings))
