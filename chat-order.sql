@@ -1,0 +1,5 @@
+create or replace function family_private.chat_list() returns jsonb language plpgsql stable security definer set search_path='' as $$begin
+ if family_private.access_role() is null then raise exception 'حساب غير معتمد';end if;
+ if not(select chat_enabled and private_chat_enabled from public.family_settings where id) then return '[]';end if;
+ return coalesce((select jsonb_agg(to_jsonb(x)) from(select t.id,p.display_name,p.avatar_path,p.id as member_id,left(case when recent.attachment_path is not null and recent.deleted_at is null then 'مرفق سابق' else recent.body end,100) as last_body,recent.created_at as last_at from family_private.chat_threads t join public.profiles p on p.id=case when t.member_a=auth.uid() then t.member_b else t.member_a end left join lateral(select m.body,m.created_at,m.attachment_path,m.deleted_at from family_private.chat_messages m where m.thread_id=t.id and m.group_id is null and family_private.chat_pair_allowed(m.sender_id) order by m.id desc limit 1) recent on true where auth.uid() in(t.member_a,t.member_b) and family_private.chat_pair_allowed(p.id) order by coalesce(recent.created_at,t.created_at) desc,t.id limit 100)x),'[]');
+end$$;

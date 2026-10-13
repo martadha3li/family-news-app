@@ -1,0 +1,15 @@
+begin;
+select set_config('request.jwt.claim.sub',(select id::text from public.profiles where is_root),true);
+update public.family_settings set chat_enabled=true,private_chat_enabled=true,restrict_gender_chat=false;
+update family_private.member_details set gender='male' where id=auth.uid();
+create temp table push_fixture as select gen_random_uuid() as member;
+insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) select member,member::text||'@example.invalid',now(),'{"full_name":"أحمد علي حسن اختبار","display_name":"أحمد علي حسن اختبار","phone":"+966500009401","gender":"male"}'::jsonb from push_fixture;
+update public.profiles set status='active' where id=(select member from push_fixture);
+select set_config('request.jwt.claim.sub',(select member::text from push_fixture),true);
+select public.push_action('subscribe',jsonb_build_object('subscription',jsonb_build_object('endpoint','https://fcm.googleapis.com/fcm/send/TEST_NOT_SENT','keys',jsonb_build_object('p256dh',repeat('A',87),'auth',repeat('A',22)))));
+select set_config('request.jwt.claim.sub',(select id::text from public.profiles where is_root),true);
+insert into public.posts(title,body,author_id,published) values('اختبار إشعار مؤقت','اختبار ملغى دون إرسال',auth.uid(),true);
+create temp table push_thread as with x as(insert into family_private.chat_threads(member_a,member_b) select least(auth.uid(),member),greatest(auth.uid(),member) from push_fixture returning id)select id from x;
+insert into family_private.chat_messages(thread_id,sender_id,body) values((select id from push_thread),auth.uid(),'PRIVATE_SECRET_TEST');
+select exists(select 1 from family_private.push_jobs where user_id=(select member from push_fixture) and kind='news') as news_queued,exists(select 1 from family_private.push_jobs where user_id=(select member from push_fixture) and kind='chat') as private_queued,not has_function_privilege('authenticated','public.push_backend(text,jsonb)','execute') as backend_private,not has_table_privilege('authenticated','family_private.push_config','select') as keys_private,not has_function_privilege('authenticated','public.media_send(jsonb)','execute') as media_disabled;
+rollback;
