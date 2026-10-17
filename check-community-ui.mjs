@@ -5,6 +5,7 @@ const {window}=new JSDOM(await readFile(new URL('./dist/index.html',import.meta.
 for(const name of ['window','document','localStorage','location','history','navigator','CustomEvent'])Object.defineProperty(globalThis,name,{value:window[name],configurable:true});
 globalThis.setInterval=()=>0;window.HTMLDialogElement.prototype.showModal=function(){this.open=true};window.HTMLDialogElement.prototype.close=function(){this.open=false};
 const id='a2234d90-b03c-45dc-8a81-4c525d8864d9';
+const tenant={id:'00000000-0000-4000-8000-000000000099',code:'01',name:'أخبار العائلة',status:'active'};localStorage.setItem('family-selection',JSON.stringify(tenant));
 localStorage.setItem('family-session',JSON.stringify({access_token:'test',refresh_token:'test',expires_at:Math.floor(Date.now()/1000)+3600}));
 const settings={id:true,chat_enabled:true,public_chat_enabled:true,private_chat_enabled:true,restrict_gender_chat:true,journalist_approval:true,auto_activate:true,allow_groups:true,endorsements_enabled:true};
 let profileRole='admin',profileStatus='active';
@@ -15,6 +16,9 @@ globalThis.fetch=async(url,options={})=>{requests.push(String(url));if(options.b
  else if(u.pathname==='/rest/v1/posts'&&u.searchParams.get('select')?.includes('likes(count)'))data=[{id:'123',author_id:id,title:'خبر الاختبار',body:'تفاصيل الخبر @أحمد علي حسن العائلة',mentioned_member_ids:[id],published:true,profiles:{display_name:'أحمد علي حسن العائلة'},likes:[{count:0}],comments:[{count:0}],created_at:new Date().toISOString()}];
  else if(u.pathname==='/rest/v1/rpc/account_action'){const b=JSON.parse(options.body);if(b.action==='directory_profile')data={id:b.payload.member,display_name:'أحمد علي حسن العائلة',role:profileRole,bio:'نبذة العضو'};else if(b.action==='history')data={posts:[],likes:[],comments:[{id:91,post_id:123,title:'خبر الاختبار',body:'تعليقي',created_at:new Date().toISOString()}],mentions:[{id:123,post_id:123,title:'خبر الاختبار',created_at:new Date().toISOString()} ]};else if(b.action==='bio')data=true;else data=[];}
  else if(u.pathname==='/rest/v1/rpc/mention_search')data=[{id,display_name:'أحمد علي حسن العائلة',relation_label:'أخ'}];
+ else if(u.pathname==='/rest/v1/rpc/tenant_current')data=tenant;
+ else if(u.pathname==='/rest/v1/rpc/tenant_kinship')data=[{code:'father',label:'أب',generation:-1}];
+ else if(u.pathname==='/rest/v1/rpc/platform_action')data=true;
  else if(u.pathname==='/rest/v1/rpc/promo_due')data=[];
  else if(u.pathname==='/rest/v1/rpc/chat_open')data='00000000-0000-4000-8000-000000000022';
  else if(u.pathname==='/rest/v1/announcements')data=[{id:'9',contact_member_id:'00000000-0000-4000-8000-000000000021',title:'إعلان زواج واضح',body:'تفاصيل الإعلان',category:'wedding',starts_at:new Date(Date.now()-60000).toISOString(),ends_at:new Date(Date.now()+60000).toISOString(),enabled:true}];

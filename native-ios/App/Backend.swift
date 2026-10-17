@@ -40,6 +40,7 @@ enum CredentialStore {
     @Published var startupProgress=0.0
     @Published var warning=""
     private var session:[String:Any]=[:]
+    private var isolatedSession=false
     private var sessionGeneration=0
     private var refreshTask:Task<Void,Error>?
     private let network:URLSession = { let c=URLSessionConfiguration.ephemeral; c.urlCache=nil; c.requestCachePolicy = .reloadIgnoringLocalCacheData; c.timeoutIntervalForRequest=30; return URLSession(configuration:c) }()
@@ -82,7 +83,7 @@ enum CredentialStore {
         };refreshTask=task
         defer{refreshTask=nil};_ = try await task.value
     }
-    private func keep(_ value:[String:Any]) throws {var s=value;if s["expires_at"]==nil {s["expires_at"]=Date().timeIntervalSince1970+(s["expires_in"] as? Double ?? 3600)};try CredentialStore.save(JSONSerialization.data(withJSONObject:s));session=s}
+    private func keep(_ value:[String:Any]) throws {var s=value;if s["expires_at"]==nil {s["expires_at"]=Date().timeIntervalSince1970+(s["expires_in"] as? Double ?? 3600)};if !isolatedSession{try CredentialStore.save(JSONSerialization.data(withJSONObject:s))};session=s}
     func restore() async {
         defer{restoring=false};startupProgress=0.15
         if let bytes=CredentialStore.load(),let value=(try? JSONSerialization.jsonObject(with:bytes)) as? [String:Any]{session=value;startupProgress=0.3;do{try await loadAccount(startup:true)}catch{warning=errorText(error)}}
@@ -91,11 +92,12 @@ enum CredentialStore {
     func login(email:String,password:String) async throws {guard let s=try await request("/auth/v1/token?grant_type=password",method:"POST",body:["email":email.trimmingCharacters(in:.whitespacesAndNewlines).lowercased()=="admin" ? "martadha3li@gmail.com":email.trimmingCharacters(in:.whitespacesAndNewlines),"password":password],auth:false) as? [String:Any] else{throw FamilyError(text:"تعذّر تسجيل الدخول.")};try keep(s);try await loadAccount()}
     func loadAccount(startup:Bool=false) async throws {let u=Item(try await request("/auth/v1/user") as? [String:Any] ?? [:]);if startup{startupProgress=0.6};let tenant=Item(try await rpc("tenant_current") as? [String:Any] ?? [:]);guard tenant.text("status")=="active",family.id.isEmpty || family.id==tenant.id else{clearSession();throw FamilyError(text:"الكيان موقوف أو الحساب تابع لعائلة أخرى. غيّر الكيان ثم سجّل الدخول.")};selectFamily(tenant);platformAdmin=(try? await rpc("platform_action",["action":"check"])) as? Bool ?? false;let p=Item(try await rpc("profile_get") as? [String:Any] ?? [:]);guard !u.id.isEmpty,!p.text("status").isEmpty else{throw FamilyError(text:"لم يكتمل ملف الحساب.")};if startup{startupProgress=0.9};user=u;profile=p;signedIn=true;warning=""}
     func logout() async {do {_ = try await request("/auth/v1/logout",method:"POST")}catch{};clearSession()}
-    func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];CredentialStore.clear();signedIn=false;platformAdmin=false;user=Item();profile=Item()}
+    func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];if !isolatedSession{CredentialStore.clear()};signedIn=false;platformAdmin=false;user=Item();profile=Item()}
     func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details.merging(["family_code":family.text("code")]){_,new in new}],auth:false)}
-    func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw,forKey:"family-selection")}
+    func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw.filter{!($0.value is NSNull)},forKey:"family-selection")}
     func exitFamily()async{await logout();family=Item();UserDefaults.standard.removeObject(forKey:"family-selection")}
     func platformLogin(username:String,password:String)async throws{
+        isolatedSession=true
         let email=username.lowercased()=="admin" ? "martadha3li@gmail.com":username
         guard let value=try await request("/auth/v1/token?grant_type=password",method:"POST",body:["email":email,"password":password],auth:false)as? [String:Any]else{throw FamilyError(text:"تعذّر الدخول")};session=value
         guard (try await rpc("platform_action",["action":"check"])as? Bool)==true else{session=[:];throw FamilyError(text:"الحساب ليس لإدارة المنصة")}

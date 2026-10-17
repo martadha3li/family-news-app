@@ -1,0 +1,53 @@
+create temp table tenant_test_ids(label text,id uuid);grant select on tenant_test_ids to authenticated,family_api_executor;
+insert into tenant_test_ids values('owner2',gen_random_uuid()),('member1',gen_random_uuid()),('member2',gen_random_uuid());
+select set_config('request.jwt.claim.sub',(select id::text from public.profiles where is_root),true);
+set local role authenticated;
+select public.tenant_request(jsonb_build_object('name','عائلة اختبار فصل','email','owner2@example.invalid','phone','+966500009801','logo','data:image/jpeg;base64,YQ=='));
+select public.platform_action('save',jsonb_build_object('id',(select id from jsonb_to_recordset(public.platform_action('list'))as x(id uuid,contact_email text)where contact_email='owner2@example.invalid'),'code','T02','status','active','payment_status','waived'));
+reset role;
+insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data)
+select id,case label when 'owner2' then 'owner2@example.invalid' else label||'@example.invalid' end,now(),jsonb_build_object('family_code',case label when 'member1' then '01' else 'T02' end,'full_name',label||' علي حسن اختبارفصل','display_name',label||' علي حسن اختبارفصل','phone',case label when 'owner2' then '+966500009802' when 'member1' then '+966500009803' else '+966500009804' end,'gender','male')from tenant_test_ids;
+update public.profiles set status='active' where id in(select id from tenant_test_ids);
+create temp table tenant_test_posts(id bigint);grant select,insert on tenant_test_posts to authenticated,family_api_executor;
+select set_config('request.jwt.claim.sub',(select id::text from tenant_test_ids where label='owner2'),true);
+set local role authenticated;
+do $$begin
+ if (public.tenant_current()->>'code')<>'T02' then raise exception 'wrong family binding';end if;
+ if public.my_role()<>'admin' then raise exception 'new tenant owner not admin';end if;
+ if (select count(*)from public.profiles)<>2 then raise exception 'cross tenant profiles leaked';end if;
+ if exists(select 1 from public.posts)then raise exception 'existing news leaked';end if;
+ begin perform public.platform_action('list');raise exception 'PLATFORM_BYPASS';exception when raise_exception then if sqlerrm='PLATFORM_BYPASS' then raise;end if;end;
+ if public.chat_search('علي')::text like '%member1%' then raise exception 'search leaked';end if;
+ begin perform public.chat_open((select id from tenant_test_ids where label='member1'));raise exception 'CROSS_CHAT';exception when raise_exception then if sqlerrm='CROSS_CHAT' then raise;end if;end;
+ begin perform public.account_action('directory_profile',jsonb_build_object('member',(select id from tenant_test_ids where label='member1')));raise exception 'DIRECTORY_LEAK';exception when raise_exception then if sqlerrm='DIRECTORY_LEAK' then raise;end if;end;
+end$$;
+with p as(insert into public.posts(author_id,title,body,published)values(auth.uid(),'اختبار عائلة ثانية','نص الاختبار',true)returning id)insert into tenant_test_posts select id from p;
+select public.chat_send(null,'دردشة عامة للعائلة الثانية');
+select public.group_action('create',jsonb_build_object('title','مجموعة معزولة','kind','group','members',jsonb_build_array((select id from tenant_test_ids where label='member2'))));
+select public.profile_get();select public.mention_search('member');select public.family_action('similar');select public.native_notifications('list');select public.storage_maintenance('usage');select public.push_action('key');
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from tenant_test_ids where label='member1'),true);
+set local role authenticated;
+do $$begin
+ if exists(select 1 from public.profiles where id=(select id from tenant_test_ids where label='owner2')) then raise exception 'family01 saw family02';end if;
+ if exists(select 1 from public.posts where id=(select id from tenant_test_posts)) then raise exception 'post isolation failed';end if;
+ if public.chat_read(null,null)::text like '%دردشة عامة للعائلة الثانية%' then raise exception 'public chat leaked';end if;
+ if public.group_action('list')::text like '%مجموعة معزولة%' then raise exception 'group leaked';end if;
+ begin insert into public.likes(post_id,user_id)values((select id from tenant_test_posts),auth.uid());raise exception 'CROSS_LIKE';exception when insufficient_privilege then null;when raise_exception then if sqlerrm='CROSS_LIKE' then raise;end if;end;
+end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from public.profiles where is_root and tenant_id=(select id from family_private.tenants where code='01')),true);
+set local role authenticated;
+do $$begin
+ if exists(select 1 from public.posts where id=(select id from tenant_test_posts))then raise exception 'family admin bypassed scope';end if;
+ if public.my_role()<>'admin' then raise exception 'old admin broken';end if;
+ if not(public.platform_action('check')::boolean)then raise exception 'platform admin broken';end if;
+end$$;
+select public.platform_action('save',jsonb_build_object('id',(select id from jsonb_to_recordset(public.platform_action('list'))as x(id uuid,code text)where code='T02'),'status','suspended'));
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from tenant_test_ids where label='owner2'),true);
+set local role authenticated;
+do $$begin if public.my_role() is not null then raise exception 'disabled tenant stayed active';end if;if exists(select 1 from public.posts)then raise exception 'disabled tenant data still visible';end if;end$$;
+reset role;
+set constraints all immediate;
+select 'PASS: code01 retained; second family owner, profiles/news/private+public chat/groups/mentions/history isolation, platform separation, activation and suspension' result;
