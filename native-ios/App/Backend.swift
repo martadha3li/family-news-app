@@ -31,6 +31,8 @@ enum CredentialStore {
     let origin="https://dlkykiducjimwehfhxfq.supabase.co"
     let publishable="sb_publishable_em1zUQS1tUhfk_8Ji17n8g_H8CPQynt"
     let website="https://family-news-app.nimbletide.chatgpt.site/"
+    @Published var family=Item(UserDefaults.standard.dictionary(forKey:"family-selection") ?? [:])
+    @Published var platformAdmin=false
     @Published var profile=Item()
     @Published var user=Item()
     @Published var signedIn=false
@@ -86,11 +88,18 @@ enum CredentialStore {
         if let bytes=CredentialStore.load(),let value=(try? JSONSerialization.jsonObject(with:bytes)) as? [String:Any]{session=value;startupProgress=0.3;do{try await loadAccount(startup:true)}catch{warning=errorText(error)}}
         startupProgress=1;try? await Task.sleep(nanoseconds:180_000_000)
     }
-    func login(email:String,password:String) async throws {guard let s=try await request("/auth/v1/token?grant_type=password",method:"POST",body:["email":email.trimmingCharacters(in:.whitespacesAndNewlines),"password":password],auth:false) as? [String:Any] else{throw FamilyError(text:"تعذّر تسجيل الدخول.")};try keep(s);try await loadAccount()}
-    func loadAccount(startup:Bool=false) async throws {let u=Item(try await request("/auth/v1/user") as? [String:Any] ?? [:]);if startup{startupProgress=0.6};let p=Item(try await rpc("profile_get") as? [String:Any] ?? [:]);guard !u.id.isEmpty,!p.text("status").isEmpty else{throw FamilyError(text:"لم يكتمل ملف الحساب.")};if startup{startupProgress=0.9};user=u;profile=p;signedIn=true;warning=""}
+    func login(email:String,password:String) async throws {guard let s=try await request("/auth/v1/token?grant_type=password",method:"POST",body:["email":email.trimmingCharacters(in:.whitespacesAndNewlines).lowercased()=="admin" ? "martadha3li@gmail.com":email.trimmingCharacters(in:.whitespacesAndNewlines),"password":password],auth:false) as? [String:Any] else{throw FamilyError(text:"تعذّر تسجيل الدخول.")};try keep(s);try await loadAccount()}
+    func loadAccount(startup:Bool=false) async throws {let u=Item(try await request("/auth/v1/user") as? [String:Any] ?? [:]);if startup{startupProgress=0.6};let tenant=Item(try await rpc("tenant_current") as? [String:Any] ?? [:]);guard tenant.text("status")=="active",family.id.isEmpty || family.id==tenant.id else{clearSession();throw FamilyError(text:"الكيان موقوف أو الحساب تابع لعائلة أخرى. غيّر الكيان ثم سجّل الدخول.")};selectFamily(tenant);platformAdmin=(try? await rpc("platform_action",["action":"check"])) as? Bool ?? false;let p=Item(try await rpc("profile_get") as? [String:Any] ?? [:]);guard !u.id.isEmpty,!p.text("status").isEmpty else{throw FamilyError(text:"لم يكتمل ملف الحساب.")};if startup{startupProgress=0.9};user=u;profile=p;signedIn=true;warning=""}
     func logout() async {do {_ = try await request("/auth/v1/logout",method:"POST")}catch{};clearSession()}
-    func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];CredentialStore.clear();signedIn=false;user=Item();profile=Item()}
-    func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details],auth:false)}
+    func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];CredentialStore.clear();signedIn=false;platformAdmin=false;user=Item();profile=Item()}
+    func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details.merging(["family_code":family.text("code")]){_,new in new}],auth:false)}
+    func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw,forKey:"family-selection")}
+    func exitFamily()async{await logout();family=Item();UserDefaults.standard.removeObject(forKey:"family-selection")}
+    func platformLogin(username:String,password:String)async throws{
+        let email=username.lowercased()=="admin" ? "martadha3li@gmail.com":username
+        guard let value=try await request("/auth/v1/token?grant_type=password",method:"POST",body:["email":email,"password":password],auth:false)as? [String:Any]else{throw FamilyError(text:"تعذّر الدخول")};session=value
+        guard (try await rpc("platform_action",["action":"check"])as? Bool)==true else{session=[:];throw FamilyError(text:"الحساب ليس لإدارة المنصة")}
+    }
     func recover(email:String?=nil) async throws {_ = try await request("/auth/v1/recover?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email ?? user.text("email")],auth:false)}
     func signedData(bucket:String,path:String) async throws -> Data {guard !path.isEmpty else{throw FamilyError(text:"لا توجد صورة")};let safe=path.split(separator:"/").map{String($0).addingPercentEncoding(withAllowedCharacters:.urlPathAllowed)!}.joined(separator:"/");let out=Item(try await request("/storage/v1/object/sign/"+bucket+"/"+safe,method:"POST",body:["expiresIn":600]) as? [String:Any] ?? [:]);guard let url=URL(string:origin+"/storage/v1"+out.text("signedURL")),url.scheme=="https",url.host==URL(string:origin)?.host else{throw FamilyError(text:"تعذّر تحميل الصورة.")};return try await network.data(from:url).0}
     func upload(_ original:Data,bucket:String,portrait:Bool=true,preserveAspect:Bool=false) async throws -> String {
