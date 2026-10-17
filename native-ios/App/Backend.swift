@@ -115,6 +115,18 @@ func announcementFit(width:Double,count:Int)->AnnouncementFit {
     let n=Double(max(1,count));let available=max(0,width-20);let gap=min(8,available/(n*10));let cell=max(0,(available-gap*(n-1))/n)
     return AnnouncementFit(gap:gap,cell:cell,icon:max(2,min(18,cell*0.5)))
 }
+struct MemberMention {let range:NSRange;let id:String}
+func memberMentionRanges(_ body:String,members:[Item])->[MemberMention] {
+    let value=body as NSString;var result:[MemberMention]=[]
+    for member in members.sorted(by:{$0.text("display_name").count>$1.text("display_name").count}) {
+        let name=member.text("display_name");guard !name.isEmpty else{continue};let token="@"+name;var start=0
+        while start<value.length{let range=value.range(of:token,options:[],range:NSRange(location:start,length:value.length-start));if range.location==NSNotFound{break};start=NSMaxRange(range)
+            let boundary=start==value.length || value.substring(with:NSRange(location:start,length:1)).rangeOfCharacter(from:.letters)==nil
+            if boundary && !result.contains(where:{NSIntersectionRange($0.range,range).length>0}){result.append(MemberMention(range:range,id:member.id))}
+        }
+    }
+    return result.sorted{$0.range.location<$1.range.location}
+}
 func q(_ key:String,_ value:String)->URLQueryItem {URLQueryItem(name:key,value:value)}
 func phone(_ input:String)throws->String {
     let normalized=String(input.map {c -> Character in
