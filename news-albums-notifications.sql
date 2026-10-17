@@ -119,3 +119,14 @@ declare cutoff timestamptz:=now()-interval '10 months';r record;latest timestamp
  else raise exception 'إجراء غير معروف';end if;
 end$function$
 ;
+create policy notification_reads_private_only on family_private.notification_reads for all to authenticated using(false) with check(false);
+create or replace function family_private.moderate_post() returns trigger language plpgsql security definer set search_path='' as $$declare r text;begin
+ if auth.uid() is null then return new;end if;r=family_private.access_role();
+ if TG_OP='UPDATE' and new.author_id<>old.author_id then raise exception 'لا يمكن تغيير صاحب الخبر';end if;
+ if r='journalist' then
+  if new.author_id<>auth.uid() then raise exception 'الخبر ليس لك';end if;
+  if new.published then if (select journalist_approval from public.family_settings where id) then new.published=false;new.moderation_status='pending';else new.moderation_status='published';end if;
+  elsif TG_OP='INSERT' or new.title is distinct from old.title or new.body is distinct from old.body or new.image_paths is distinct from old.image_paths then new.moderation_status='draft';end if;
+ elsif r='admin' then if new.published then new.moderation_status='published';elsif new.moderation_status='published' then new.moderation_status='draft';end if;
+ else raise exception 'النشر للمدير والصحفي فقط';end if;return new;
+end $$;

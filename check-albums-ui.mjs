@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+const {JSDOM}=await import(process.env.FAMILY_UI_TEST_MODULE||'jsdom');
+const {window}=new JSDOM('<!doctype html><body></body>',{url:'https://example.invalid'});
+globalThis.document=window.document;globalThis.matchMedia=()=>({matches:true});
+window.HTMLElement.prototype.scrollTo=function({left}){this.scrollLeft=left;this.dispatchEvent(new window.Event('scroll'));};
+const {imagePaths,renderAlbum}=await import('./dist/albums.mjs');
+assert.deepEqual(imagePaths({image_path:'legacy.jpg'}),['legacy.jpg']);
+assert.deepEqual(imagePaths({image_path:'cover.jpg',image_paths:['cover.jpg','second.jpg']}),['cover.jpg','second.jpg']);
+assert.equal(await renderAlbum({},()=>{}),null);
+const signed=[];const album=await renderAlbum({title:'اختبار',image_paths:['1.jpg','2.jpg','3.jpg','4.jpg','5.jpg']},async path=>{signed.push(path);return 'https://example.invalid/'+path});
+document.body.append(album);const track=album.querySelector('.album-track');Object.defineProperty(track,'clientWidth',{value:320});
+assert.equal(album.querySelectorAll('img').length,5);assert.deepEqual(signed,['1.jpg','2.jpg','3.jpg','4.jpg','5.jpg']);assert.equal(album.querySelector('.album-count').textContent,'1 / 5');
+album.querySelectorAll('.album-dots button')[3].click();assert.equal(track.scrollLeft,960);assert.equal(album.querySelector('.album-count').textContent,'4 / 5');
+track.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));assert.equal(track.scrollLeft,640);assert.equal(album.querySelector('.album-count').textContent,'3 / 5');
+track.scrollLeft=1280;track.dispatchEvent(new window.Event('scroll'));assert.equal(album.querySelectorAll('[aria-pressed=true]').length,1);assert.equal(album.querySelector('.album-count').textContent,'5 / 5');
+const failed=await renderAlbum({image_path:'broken.jpg'},async()=>{throw new Error('offline')});assert.ok(failed.querySelector('button'));assert.equal(failed.querySelector('.album-count'),null);
+console.log('PASS: legacy albums, all five signed private photos, swipe/keyboard/dot navigation, counter, failed image retry');
