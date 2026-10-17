@@ -13,6 +13,8 @@ globalThis.fetch=async(url,options={})=>{requests.push(String(url));if(options.b
  if(u.pathname==='/auth/v1/user')data={id,email:'test@example.invalid'};
  else if(u.pathname==='/rest/v1/profiles')data=[{id,display_name:'أحمد علي حسن العائلة',role:profileRole,status:profileStatus,is_root:profileRole==='admin'}];
  else if(u.pathname==='/rest/v1/posts'&&u.searchParams.get('select')?.includes('likes(count)'))data=[{id:'00000000-0000-0000-0000-000000000009',author_id:id,title:'خبر الاختبار',body:'تفاصيل الخبر',published:true,profiles:{display_name:'أحمد علي حسن العائلة'},likes:[{count:0}],comments:[{count:0}],created_at:new Date().toISOString()}];
+ else if(u.pathname==='/rest/v1/rpc/mention_search')data=[{id,display_name:'أحمد علي حسن العائلة',relation_label:'أخ'}];
+ else if(u.pathname==='/rest/v1/announcements')data=[{id:'9',title:'إعلان زواج واضح',body:'تفاصيل الإعلان',category:'wedding',starts_at:new Date(Date.now()-60000).toISOString(),ends_at:new Date(Date.now()+60000).toISOString(),enabled:true}];
  else if(u.pathname==='/rest/v1/kinship_options')data=[{code:'father',label:'أب',generation:-1,enabled:true,for_reference:true},{code:'brother',label:'أخ',generation:0,enabled:true,for_reference:true}];
  else if(u.pathname==='/rest/v1/rpc/family_action'){const b=JSON.parse(options.body);if(b.action==='similar')data=[{id:'00000000-0000-0000-0000-000000000003',display_name:'حسن علي حسن العائلة',score:90}];}
  else if(u.pathname==='/rest/v1/rpc/storage_maintenance'){const b=JSON.parse(options.body);if(b.action==='usage')data={database_bytes:10000000,storage_bytes:400000,limits:{plan:'free',database_limit:524288000,file_limit:1073741824},records:{users:2,news:2,comments:3,messages:5},measured_at:new Date().toISOString(),buckets:[],tables:[]};if(b.action==='preview')data={rooms:0,messages:0,estimated_bytes:0,cutoff:new Date().toISOString()};}
@@ -29,10 +31,14 @@ assert.equal($('news-section').hidden,false);
 assert.equal($('header-actions').hidden,false);
 assert.ok($('header-actions').contains($('profile-open')));
 assert.ok($('header-actions').contains($('logout')));
+assert.equal($('announcement-strip').querySelector('.announcement-title').textContent,'إعلان زواج واضح');
+$('announcement-strip').querySelector('button').click();await tick();assert.equal(document.querySelector('.ad-detail h2').textContent,'إعلان زواج واضح');document.querySelector('.ad-detail').querySelector('button').click();
+const commentAction=document.querySelector('.post>.post-actions button[aria-label^=التعليقات]');commentAction.click();await tick();assert.equal(document.querySelector('.post>.comments').hidden,false);assert.ok(document.querySelector('.post>.comments .comment-form'));assert.equal(document.querySelector('.post>.comments').closest('dialog'),null);commentAction.click();await tick();assert.equal(document.querySelector('.post>.comments').hidden,true);
 $('menu-open').click();assert.equal($('nav-drawer').open,true);assert.equal($('menu-open').getAttribute('aria-expanded'),'true');
 $('chat-tab').click();await tick();assert.equal($('nav-drawer').open,false);
 $('new-post').click();assert.equal($('editor').open,true);assert.ok($('mention-picker'));
 $('mention-search').value='أحمد';$('mention-search').dispatchEvent(new window.Event('input'));await new Promise(r=>setTimeout(r,350));
+$('post-body').value='خبر @';$('post-body').setSelectionRange(5,5);$('post-body').dispatchEvent(new window.Event('input'));await new Promise(r=>setTimeout(r,220));assert.equal($('inline-mention-results').hidden,false);$('inline-mention-results').querySelector('[role=option]').click();assert.ok($('post-body').value.includes('@أحمد علي حسن العائلة'));
 $('mention-results').querySelector('button').click();assert.ok($('mention-selected').textContent.includes('أحمد'));$('close-editor').click();
 $('mentioned-news-open').click();await tick();assert.ok(requests.some(x=>x.includes('mentioned_member_ids=cs.')));
 
