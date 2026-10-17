@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import LocalAuthentication
 
 @main struct FamilyNewsApp: App {
     @StateObject private var api=Backend()
@@ -33,11 +34,28 @@ struct Avatar:View {let path:String;let name:String;var size:CGFloat=42;var body
 struct RootScreen:View {
     @EnvironmentObject private var api:Backend
     @EnvironmentObject private var alerts:NativeNotifications
+    @StateObject private var gate=BiometricGate()
     @Environment(\.scenePhase) private var phase
-    var body:some View{Group{if api.restoring{LaunchScreen(progress:api.startupProgress)}else if !api.signedIn{LoginScreen()}else{HomeScreen()}}.task{await api.restore()}.task(id:String(api.active)+String(describing:phase)){
-        guard api.active,phase == .active else{return};await alerts.updatePermission()
-        while !Task.isCancelled && api.active && phase == .active{await alerts.refresh(api);do{try await Task.sleep(nanoseconds:15_000_000_000)}catch{break}}
-    }.onChange(of:api.signedIn){_,value in if !value{alerts.reset()}}.onChange(of:api.active){_,value in if !value{alerts.reset()}}.onChange(of:phase){_,value in if value == .active,api.signedIn{Task{do{try await api.loadAccount()}catch{api.warning=api.errorText(error)}}}}}
+    var body:some View {
+        Group {
+            if (gate.hasSession || api.signedIn) && !gate.unlocked{BiometricLockScreen(gate:gate,api:api)}
+            else if api.restoring{LaunchScreen(progress:api.startupProgress)}
+            else if !api.signedIn{LoginScreen()}
+            else{HomeScreen()}
+        }.task{await gate.start(api)}
+        .task(id:String(api.active)+String(gate.unlocked)+String(describing:phase)){
+            guard api.active,gate.unlocked,phase == .active else{return};await alerts.updatePermission()
+            while !Task.isCancelled && api.active && gate.unlocked && phase == .active{await alerts.refresh(api);do{try await Task.sleep(nanoseconds:15_000_000_000)}catch{break}}
+        }
+        .onReceive(NotificationCenter.default.publisher(for:UIApplication.willResignActiveNotification)){_ in PrivacyShield.show()}
+        .onReceive(NotificationCenter.default.publisher(for:UIApplication.didBecomeActiveNotification)){_ in PrivacyShield.hide()}
+        .onChange(of:api.signedIn){_,value in if value{Task{await gate.afterPasswordLogin(api)}}else{alerts.reset();gate.signedOut()}}
+        .onChange(of:api.active){_,value in if !value{alerts.reset()}}
+        .onChange(of:phase){_,value in
+            if value == .background{gate.lock();alerts.visibleThread=""}
+            if value == .active{Task{await gate.open(api)}}
+        }
+    }
 }
 struct LoginScreen:View {
     @EnvironmentObject private var api:Backend
@@ -84,4 +102,70 @@ struct LaunchScreen:View {
             Brand();VStack(spacing:10){ProgressView(value:progress).tint(brandBlue).frame(width:180);Text("\(Int(progress*100))٪").font(.system(size:20,weight:.semibold,design:.rounded)).monospacedDigit();Text("جاري تهيئة أخبار العائلة").font(.footnote).foregroundStyle(.secondary)}
         }}.onAppear{withAnimation(.easeInOut(duration:1.6).repeatForever(autoreverses:true)){animate=true}}.animation(.easeInOut(duration:0.2),value:progress)
     }
+}
+
+@MainActor final class BiometricGate:ObservableObject {
+    @Published private(set) var unlocked=false
+    @Published private(set) var busy=false
+    @Published private(set) var hasSession=CredentialStore.hasSession()
+    @Published var message=""
+    @Published private(set) var title="بصمة الجهاز"
+    @Published private(set) var symbol="faceid"
+    private var context:LAContext?
+    private var generation=0
+    private var starting=true
+    private var automaticAttempted=false
+    func describe(_ context:LAContext){switch context.biometryType{case .touchID:title="Touch ID";symbol="touchid";case .faceID:title="Face ID";symbol="faceid";default:title="بصمة الجهاز";symbol="lock.fill"}}
+    func start(_ api:Backend)async {
+        starting=false
+        if hasSession{await open(api)}else{await api.restore()}
+    }
+    func afterPasswordLogin(_ api:Backend)async {
+        hasSession=true;guard !unlocked,!busy else{return}
+        let probe=LAContext();var error:NSError?;let available=probe.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,error:&error);describe(probe)
+        if !available{unlocked=true;message="";return} // The password has just been verified by the server.
+        await open(api)
+    }
+    func open(_ api:Backend,automatic:Bool=true)async {
+        guard !starting,!busy,!unlocked,hasSession || api.signedIn,!(automatic && automaticAttempted) else{return}
+        automaticAttempted=true
+        let identity=generation;let context=LAContext();self.context=context
+        context.localizedCancelTitle="إلغاء";context.localizedFallbackTitle="";context.touchIDAuthenticationAllowableReuseDuration=0
+        var error:NSError?;let available=context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,error:&error);describe(context)
+        guard available else{message="فعّل بصمة الوجه أو الإصبع في إعدادات الجهاز، أو سجّل الدخول بالبريد وكلمة المرور.";self.context=nil;return}
+        busy=true;message=""
+        do {
+            let success=try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,localizedReason:"افتح أخبار العائلة باستخدام بصمتك")
+            guard identity==generation,success else{if identity==generation{busy=false};return}
+            unlocked=true;busy=false;self.context=nil
+            if !api.signedIn{await api.restore()}else{do{try await api.loadAccount()}catch{api.warning=api.errorText(error)}}
+        }catch {
+            guard identity==generation else{return};busy=false;self.context=nil;unlocked=false
+            if let local=error as? LAError,local.code == .userCancel || local.code == .systemCancel || local.code == .appCancel{message="التطبيق مقفل. اضغط المحاولة مجددًا للفتح."}else{message="لم يتم التحقق من البصمة. أعد المحاولة أو سجّل الدخول بكلمة المرور."}
+        }
+    }
+    func lock(){guard hasSession else{return};automaticAttempted=false;generation += 1;context?.invalidate();context=nil;busy=false;unlocked=false;message=""}
+    func signedOut(){automaticAttempted=false;generation += 1;context?.invalidate();context=nil;busy=false;unlocked=false;hasSession=false;message=""}
+    func passwordLogin(_ api:Backend){signedOut();api.clearSession();api.restoring=false}
+}
+struct BiometricLockScreen:View {
+    @ObservedObject var gate:BiometricGate
+    @ObservedObject var api:Backend
+    var body:some View {
+        VStack(spacing:24){Spacer();Brand();Image(systemName:gate.symbol).font(.system(size:60,weight:.light)).foregroundStyle(brandBlue);Text("أخبار العائلة مقفل").font(.title2.bold());Text("افتح التطبيق باستخدام "+gate.title).font(.subheadline).foregroundStyle(.secondary)
+            if !gate.message.isEmpty{Text(gate.message).font(.footnote).multilineTextAlignment(.center).foregroundStyle(.secondary)}
+            Button{Task{await gate.open(api,automatic:false)}}label:{HStack{if gate.busy{ProgressView()}else{Image(systemName:gate.symbol)};Text("فتح باستخدام "+gate.title)}.frame(maxWidth:.infinity).padding(12)}.buttonStyle(.borderedProminent).disabled(gate.busy)
+            Button("تسجيل الدخول بالبريد وكلمة المرور"){gate.passwordLogin(api)}.font(.subheadline).disabled(gate.busy)
+            Spacer();Text("تُفحص البصمة بواسطة الجهاز، ولا تُرسل صور الوجه أو البصمة إلى التطبيق.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }.padding(28).frame(maxWidth:480).frame(maxWidth:.infinity,maxHeight:.infinity).background(Color(.systemBackground)).privacySensitive()
+    }
+}
+@MainActor enum PrivacyShield {
+    static var covers:[UIView]=[]
+    static func show(){guard covers.isEmpty else{return};for scene in UIApplication.shared.connectedScenes.compactMap({$0 as? UIWindowScene}){for window in scene.windows where window.isKeyWindow{
+        let cover=UIView(frame:window.bounds);cover.autoresizingMask=[.flexibleWidth,.flexibleHeight];cover.backgroundColor = .systemBackground;cover.isUserInteractionEnabled=true
+        let logo=UIImageView(image:UIImage(named:"FamilyLogo"));logo.contentMode = .scaleAspectFit;logo.translatesAutoresizingMaskIntoConstraints=false;cover.addSubview(logo);NSLayoutConstraint.activate([logo.centerXAnchor.constraint(equalTo:cover.centerXAnchor),logo.centerYAnchor.constraint(equalTo:cover.centerYAnchor),logo.widthAnchor.constraint(equalToConstant:190),logo.heightAnchor.constraint(equalToConstant:70)])
+        window.addSubview(cover);covers.append(cover)
+    }}}
+    static func hide(){for cover in covers{cover.removeFromSuperview()};covers=[]}
 }

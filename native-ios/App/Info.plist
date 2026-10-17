@@ -51,5 +51,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSFaceIDUsageDescription</key>
+	<string>استخدام بصمة الوجه لفتح أخبار العائلة وحماية أخبارك ومحادثاتك عند كل عودة للتطبيق.</string>
 </dict>
 </plist>

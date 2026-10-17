@@ -71,3 +71,12 @@ assert 'InlineComments(post:post' in news and '.frame(height:64)' in news
 assert 'MentionEditor' in news and 'mention_search' in news
 assert plist['CFBundleShortVersionString']=='$(MARKETING_VERSION)'
 print('PASS: inline comments, bounded ad bar, mention caret and dynamic build version')
+
+app=(root/'App/FamilyNewsApp.swift').read_text()
+assert plist.get('NSFaceIDUsageDescription')
+assert 'deviceOwnerAuthenticationWithBiometrics' in app
+assert 'touchIDAuthenticationAllowableReuseDuration=0' in app
+assert 'value == .background{gate.lock()' in app
+assert 'identity==generation' in app and 'context?.invalidate()' in app
+assert 'gate.unlocked' in app and 'PrivacyShield.show()' in app
+print('PASS: Face ID usage text, biometric gate, no reuse, background relock, stale-auth protection and privacy cover')

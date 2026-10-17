@@ -22,6 +22,7 @@ struct FamilyError: LocalizedError { let text: String; var errorDescription: Str
 enum CredentialStore {
     static let service = "com.martadha3li.familynews.native-session"
     static var query: [String: Any] { [kSecClass as String:kSecClassGenericPassword, kSecAttrService as String:service, kSecAttrAccount as String:"session"] }
+    static func hasSession()->Bool {var q=query;q[kSecReturnAttributes as String]=true;q[kSecMatchLimit as String]=kSecMatchLimitOne;return SecItemCopyMatching(q as CFDictionary,nil)==errSecSuccess}
     static func load() -> Data? { var q=query; q[kSecReturnData as String]=true; q[kSecMatchLimit as String]=kSecMatchLimitOne; var out:CFTypeRef?; guard SecItemCopyMatching(q as CFDictionary,&out)==errSecSuccess else{return nil}; return out as? Data }
     static func save(_ data: Data) throws { var q=query; SecItemDelete(q as CFDictionary); q[kSecValueData as String]=data; q[kSecAttrAccessible as String]=kSecAttrAccessibleWhenUnlockedThisDeviceOnly; let status=SecItemAdd(q as CFDictionary,nil); if status != errSecSuccess { throw FamilyError(text:"تعذّر حفظ جلسة الدخول بأمان. أعد المحاولة.") } }
     static func clear() { SecItemDelete(query as CFDictionary) }
