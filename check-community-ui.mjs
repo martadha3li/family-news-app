@@ -7,10 +7,12 @@ globalThis.setInterval=()=>0;window.HTMLDialogElement.prototype.showModal=functi
 const id='a2234d90-b03c-45dc-8a81-4c525d8864d9';
 localStorage.setItem('family-session',JSON.stringify({access_token:'test',refresh_token:'test',expires_at:Math.floor(Date.now()/1000)+3600}));
 const settings={id:true,chat_enabled:true,public_chat_enabled:true,private_chat_enabled:true,restrict_gender_chat:true,journalist_approval:true,auto_activate:true,allow_groups:true,endorsements_enabled:true};
+let profileRole='admin',profileStatus='active';
 const requests=[],bodies=[];
 globalThis.fetch=async(url,options={})=>{requests.push(String(url));if(options.body&&typeof options.body==='string')bodies.push({url:String(url),body:JSON.parse(options.body)});const u=new URL(url);let data=[];
  if(u.pathname==='/auth/v1/user')data={id,email:'test@example.invalid'};
- else if(u.pathname==='/rest/v1/profiles')data=[{id,display_name:'أحمد علي حسن العائلة',role:'admin',status:'active',is_root:true}];
+ else if(u.pathname==='/rest/v1/profiles')data=[{id,display_name:'أحمد علي حسن العائلة',role:profileRole,status:profileStatus,is_root:profileRole==='admin'}];
+ else if(u.pathname==='/rest/v1/posts'&&u.searchParams.get('select')?.includes('likes(count)'))data=[{id:'00000000-0000-0000-0000-000000000009',author_id:id,title:'خبر الاختبار',body:'تفاصيل الخبر',published:true,profiles:{display_name:'أحمد علي حسن العائلة'},likes:[{count:0}],comments:[{count:0}],created_at:new Date().toISOString()}];
  else if(u.pathname==='/rest/v1/kinship_options')data=[{code:'father',label:'أب',generation:-1,enabled:true,for_reference:true},{code:'brother',label:'أخ',generation:0,enabled:true,for_reference:true}];
  else if(u.pathname==='/rest/v1/rpc/family_action'){const b=JSON.parse(options.body);if(b.action==='similar')data=[{id:'00000000-0000-0000-0000-000000000003',display_name:'حسن علي حسن العائلة',score:90}];}
  else if(u.pathname==='/rest/v1/rpc/storage_maintenance'){const b=JSON.parse(options.body);if(b.action==='usage')data={database_bytes:10000000,storage_bytes:400000,limits:{plan:'free',database_limit:524288000,file_limit:1073741824},records:{users:2,news:2,comments:3,messages:5},measured_at:new Date().toISOString(),buckets:[],tables:[]};if(b.action==='preview')data={rooms:0,messages:0,estimated_bytes:0,cutoff:new Date().toISOString()};}
@@ -47,5 +49,15 @@ $('family-tree-open').click();await tick();assert.ok(document.querySelector('.fa
 $('chat-fab').click();await tick();$('chat-search').value='أ';$('chat-search').dispatchEvent(new window.Event('input'));await new Promise(r=>setTimeout(r,400));assert.ok(bodies.some(x=>x.url.includes('/rpc/chat_search')&&x.body.term==='أ'));
 $('chat-groups').querySelector('button').click();await tick();$('chat-messages').querySelector('.message-options').click();await tick();const reply=[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='↩ الرد');assert.ok(reply);reply.click();assert.equal($('chat-reply-preview').hidden,false);$('chat-public').click();await tick();assert.equal($('chat-reply-preview').hidden,true);
 $('storage-tab').click();await tick();assert.equal($('storage-section').hidden,false);assert.ok($('storage-metrics').textContent.includes('متبق'));$('storage-preview-chats').click();await tick();assert.ok($('storage-chat-review').textContent.includes('0 رسالة'));
+$('mobile-navigation').querySelector('[data-destination=news]').click();await tick();assert.equal($('news-section').hidden,false);assert.equal($('mobile-navigation').querySelector('[data-destination=news]').getAttribute('aria-current'),'page');
+const like=document.querySelector('.post-actions button[aria-pressed]');assert.ok(like.querySelector('svg'));like.click();await tick();assert.equal(like.getAttribute('aria-pressed'),'true');assert.ok(like.textContent.includes('1 إعجاب'));assert.ok(bodies.some(x=>x.url.includes('/rest/v1/likes')&&x.body.post_id==='00000000-0000-0000-0000-000000000009'));
+const comments=document.querySelector('.post-actions button[aria-expanded]');comments.click();await tick();assert.equal(comments.getAttribute('aria-expanded'),'true');assert.equal(document.querySelector('.post .comments').hidden,false);
+$('mobile-navigation').querySelector('[data-destination=profile]').click();await tick();assert.equal($('profile-dialog').open,true);$('profile-close').click();
+$('mobile-navigation').querySelector('[data-destination=create]').click();assert.equal($('editor').open,true);$('close-editor').click();
+$('mobile-navigation').querySelector('[data-destination=menu]').click();assert.equal($('nav-drawer').open,true);$('menu-close').click();
+$('mobile-navigation').querySelector('[data-destination=chat]').click();await tick();assert.equal(document.body.classList.contains('chat-page'),true);document.querySelector('.chat-exit').click();await tick();assert.equal(document.body.classList.contains('chat-page'),false);
+profileRole='member';$('check-status').click();await tick();assert.equal($('mobile-navigation').querySelector('[data-destination=create]').hidden,true);assert.equal($('members-tab').hidden,true);assert.equal($('mobile-navigation').hidden,false);
+profileStatus='pending';$('check-status').click();await tick();assert.equal($('mobile-navigation').hidden,true);assert.equal($('approved').hidden,true);
+$('logout').click();await tick();assert.equal($('mobile-navigation').hidden,true);assert.equal(document.body.classList.contains('signed-in'),false);assert.equal($('auth-screen').hidden,false);
 console.log('PASS: application startup, account dialog, signup gender fields, chat/settings/review navigation.');
 process.exit(0);

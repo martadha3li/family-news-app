@@ -6,7 +6,7 @@ icon=Image.open(root/'www/icon-512.png').convert('RGB')
 android=root/'android/app/src/main/res'
 if android.exists():
  gradle=root/'android/app/build.gradle'
- text=gradle.read_text().replace('versionCode 1','versionCode 3').replace('versionName "1.0"','versionName "1.2.0"');gradle.write_text(text)
+ text=gradle.read_text().replace('versionCode 1','versionCode 5').replace('versionName "1.0"','versionName "1.3.0"');gradle.write_text(text)
  for density,size in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
   folder=android/('mipmap-'+density);folder.mkdir(parents=True,exist_ok=True)
   for name in ['ic_launcher.png','ic_launcher_round.png','ic_launcher_foreground.png']:icon.resize((size,size)).save(folder/name)
@@ -16,8 +16,8 @@ ios=root/'ios/App/App'
 if ios.exists():
  p=ios/'Info.plist'
  settings=plistlib.loads(p.read_bytes())
- settings['CFBundleShortVersionString']='1.2.0'
- settings['CFBundleVersion']='4'
+ settings['CFBundleShortVersionString']='1.3.0'
+ settings['CFBundleVersion']='5'
  settings['NSPhotoLibraryUsageDescription']='اختيار صورة لإرفاقها بخبر في أخبار العائلة.'
  settings.pop('NSMicrophoneUsageDescription',None)
  settings['NSCameraUsageDescription']='التقاط صورة لإرفاقها بخبر في أخبار العائلة.'
