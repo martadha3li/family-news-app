@@ -32,6 +32,7 @@ enum CredentialStore {
     @Published var restoring=true
     @Published var warning=""
     private var session:[String:Any]=[:]
+    private var sessionGeneration=0
     private var refreshTask:Task<[String:Any],Error>?
     private let network:URLSession = { let c=URLSessionConfiguration.ephemeral; c.urlCache=nil; c.requestCachePolicy = .reloadIgnoringLocalCacheData; c.timeoutIntervalForRequest=30; return URLSession(configuration:c) }()
     var active:Bool { signedIn && profile.text("status")=="active" }
@@ -39,7 +40,8 @@ enum CredentialStore {
     var writer:Bool { active && ["admin","journalist"].contains(profile.text("role")) }
     func errorText(_ error:Error)->String { let m=error.localizedDescription; if m.contains("Invalid login credentials"){return "البريد أو كلمة المرور غير صحيحة."}; if m.contains("Email not confirmed"){return "أكد بريدك من الرسالة أولًا."}; if m.lowercased().contains("rate limit"){return "انتظر قليلًا قبل إعادة المحاولة."}; return m }
     func request(_ path:String,method:String="GET",body:[String:Any]?=nil,auth:Bool=true,data:Data?=nil,mime:String="application/json") async throws -> Any {
-        if auth { try await refreshIfNeeded() }
+        let generation=sessionGeneration
+        if auth { try await refreshIfNeeded(); guard session["access_token"] is String else {throw FamilyError(text:"سجل دخولك مجددًا.")} }
         guard let url=URL(string:origin+path) else {throw FamilyError(text:"عنوان الطلب غير صالح.")}
         var r=URLRequest(url:url);r.httpMethod=method;r.setValue(publishable,forHTTPHeaderField:"apikey")
         if auth,let token=session["access_token"] as? String {r.setValue("Bearer "+token,forHTTPHeaderField:"Authorization")}
@@ -47,6 +49,7 @@ enum CredentialStore {
         if let data=data {r.httpBody=data;r.setValue(mime,forHTTPHeaderField:"Content-Type")}
         else if let body=body {r.httpBody=try JSONSerialization.data(withJSONObject:body);r.setValue("application/json",forHTTPHeaderField:"Content-Type")}
         let (bytes,response)=try await network.data(for:r)
+        if auth && generation != sessionGeneration {throw CancellationError()}
         let json:Any=bytes.isEmpty ? NSNull() : (try JSONSerialization.jsonObject(with:bytes,options:.fragmentsAllowed))
         guard let http=response as? HTTPURLResponse else {throw FamilyError(text:"تعذّر الاتصال.")}
         guard (200..<300).contains(http.statusCode) else {
@@ -64,8 +67,9 @@ enum CredentialStore {
         let expiry=(session["expires_at"] as? NSNumber)?.doubleValue ?? 0
         guard expiry<Date().timeIntervalSince1970+60 else {return}
         if let task=refreshTask {_ = try await task.value;return}
+        let generation=sessionGeneration
         let task=Task { () throws -> [String:Any] in
-            do {guard let fresh=try await self.request("/auth/v1/token?grant_type=refresh_token",method:"POST",body:["refresh_token":refresh],auth:false) as? [String:Any] else {throw FamilyError(text:"سجل دخولك مجددًا.")};try self.keep(fresh);return fresh}
+            do {guard let fresh=try await self.request("/auth/v1/token?grant_type=refresh_token",method:"POST",body:["refresh_token":refresh],auth:false) as? [String:Any] else {throw FamilyError(text:"سجل دخولك مجددًا.")};guard generation==self.sessionGeneration else{throw CancellationError()};try Task.checkCancellation();try self.keep(fresh);return fresh}
             catch {if (error as? FamilyError) != nil {self.clearSession()};throw error}
         };refreshTask=task
         defer{refreshTask=nil};_ = try await task.value
@@ -75,9 +79,9 @@ enum CredentialStore {
     func login(email:String,password:String) async throws {guard let s=try await request("/auth/v1/token?grant_type=password",method:"POST",body:["email":email.trimmingCharacters(in:.whitespacesAndNewlines),"password":password],auth:false) as? [String:Any] else{throw FamilyError(text:"تعذّر تسجيل الدخول.")};try keep(s);try await loadAccount()}
     func loadAccount() async throws {let u=Item(try await request("/auth/v1/user") as? [String:Any] ?? [:]);let p=Item(try await rpc("profile_get") as? [String:Any] ?? [:]);guard !u.id.isEmpty,!p.text("status").isEmpty else{throw FamilyError(text:"لم يكتمل ملف الحساب.")};user=u;profile=p;signedIn=true;warning=""}
     func logout() async {do {_ = try await request("/auth/v1/logout",method:"POST")}catch{};clearSession()}
-    func clearSession(){session=[:];CredentialStore.clear();signedIn=false;user=Item();profile=Item()}
+    func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];CredentialStore.clear();signedIn=false;user=Item();profile=Item()}
     func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details],auth:false)}
-    func recover() async throws {_ = try await request("/auth/v1/recover?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":user.text("email")],auth:false)}
+    func recover(email:String?=nil) async throws {_ = try await request("/auth/v1/recover?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email ?? user.text("email")],auth:false)}
     func signedData(bucket:String,path:String) async throws -> Data {guard !path.isEmpty else{throw FamilyError(text:"لا توجد صورة")};let safe=path.split(separator:"/").map{String($0).addingPercentEncoding(withAllowedCharacters:.urlPathAllowed)!}.joined(separator:"/");let out=Item(try await request("/storage/v1/object/sign/"+bucket+"/"+safe,method:"POST",body:["expiresIn":600]) as? [String:Any] ?? [:]);guard let url=URL(string:origin+"/storage/v1"+out.text("signedURL")),url.scheme=="https",url.host==URL(string:origin)?.host else{throw FamilyError(text:"تعذّر تحميل الصورة.")};return try await network.data(from:url).0}
     func upload(_ original:Data,bucket:String,portrait:Bool=true) async throws -> String {
         guard original.count<=20*1024*1024,let image=UIImage(data:original) else{throw FamilyError(text:"اختر صورة أقل من 20 ميجابايت.")}

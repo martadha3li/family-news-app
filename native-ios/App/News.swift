@@ -7,6 +7,7 @@ struct NewsScreen:View {
     var scope:NewsScope = .published
     @State private var posts:[Item]=[],ads:[Item]=[]
     @State private var error=""
+    @State private var now=Date()
     @State private var loading=false,more=true
     @State private var editor:Item?,details:Item?
     var body:some View{ScrollView{LazyVStack(spacing:18){if scope == .published{ForEach(activeAds){ad in Button{details=ad}label:{HStack{Image(systemName:ad.text("category")=="death" ? "leaf":"megaphone");Text(ad.text("title")).font(.subheadline.bold());Spacer();Image(systemName:"chevron.left").font(.caption)}.foregroundStyle(adColor(ad)).padding(14).background(adColor(ad).opacity(0.08),in:RoundedRectangle(cornerRadius:14))}.padding(.horizontal)}}
@@ -15,8 +16,8 @@ struct NewsScreen:View {
         ForEach(posts){p in NativePost(post:p,edit:{editor=p},refresh:{await load(reset:true)},scope:scope)}
         if loading{ProgressView().padding()}
         if more && !posts.isEmpty{TaskButton(title:"عرض أخبار أقدم",symbol:"arrow.down"){await load(reset:false)}}
-    }.padding(.vertical,12).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}.task{await load(reset:true)}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{ScrollView{VStack(alignment:.leading,spacing:20){Text(ad.text("title")).font(.title2.bold());Text(ad.text("body"));Text("حتى \(dateValue(ad.text("ends_at")).formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)}.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){details=nil}}}}}}
-    var activeAds:[Item]{ads.filter{$0.flag("enabled") && dateValue($0.text("starts_at"))<=Date() && dateValue($0.text("ends_at"))>Date()}}
+    }.padding(.vertical,12).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}}.task{await load(reset:true);while !Task.isCancelled{do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{break};now=Date()}}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{ScrollView{VStack(alignment:.leading,spacing:20){Text(ad.text("title")).font(.title2.bold());Text(ad.text("body"));Text("حتى \(dateValue(ad.text("ends_at")).formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)}.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){details=nil}}}}}}
+    var activeAds:[Item]{ads.filter{$0.flag("enabled") && dateValue($0.text("starts_at"))<=now && dateValue($0.text("ends_at"))>now}}
     func adColor(_ ad:Item)->Color{switch ad.text("category"){case "death":return .gray;case "urgent":return .red;case "wedding","donation":return brandPink;default:return brandBlue}}
     func load(reset:Bool)async{if loading{return};loading=true;defer{loading=false};do{var query=[q("select","*,profiles:profiles!posts_author_id_fkey(display_name,avatar_path),likes(count),comments(count)"),q("order","created_at.desc,id.desc"),q("limit","20"),q("offset",reset ? "0":String(posts.count))];switch scope{case .published:query += [q("published","eq.true"),q("deleted_at","is.null")];case .drafts:query += [q("published","eq.false"),q("author_id","eq."+api.user.id),q("deleted_at","is.null")];case .review:query += [q("moderation_status","eq.pending"),q("deleted_at","is.null")];case .hidden:query += [q("deleted_at","not.is.null")];case .mentioned:query += [q("mentioned_member_ids","cs.{"+api.user.id+"}"),q("published","eq.true"),q("deleted_at","is.null")]} ;let rows=try await api.table("posts",query);if reset{posts=rows}else{posts += rows};more=rows.count==20;error="";if scope == .published{ads=try await api.table("announcements",[q("select","*"),q("enabled","eq.true"),q("limit","200"),q("order","starts_at.desc")])}}catch{self.error=api.errorText(error)}}
 }
@@ -44,8 +45,43 @@ struct CommentsScreen:View {
     let post:Item
     @State private var rows:[Item]=[],bodyText="",error=""
     @State private var more=true
-    func load(reset:Bool=true)async{do{let r=try await api.table("comments",[q("select","id,body,author_id,created_at,profiles:profiles!comments_author_id_fkey(display_name)"),q("post_id","eq."+post.id),q("order","created_at.asc,id.asc"),q("limit","50"),q("offset",reset ? "0":String(rows.count))]);if reset{rows=r}else{rows += r};more=r.count==50;error=""}catch{self.error=api.errorText(error)}}
-    var body:some View{List{LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:7){Text(r.child("profiles").text("display_name")).font(.subheadline.bold());Text(r.text("body")).font(.subheadline);Text(dateValue(r.text("created_at")),style:.date).font(.caption2).foregroundStyle(.secondary)}.swipeActions{if api.admin || r.text("author_id")==api.user.id{Button("حذف",role:.destructive){Task{do{_ = try await api.table("comments",[q("id","eq."+r.id)],method:"DELETE");await load()}catch{self.error=api.errorText(error)}}}}};if more{TaskButton(title:"تعليقات أقدم"){await load(reset:false)}}}.listStyle(.plain).scrollIndicators(.hidden).safeAreaInset(edge:.bottom){HStack{TextField("أضف تعليقًا…",text:$bodyText,axis:.vertical).lineLimit(1...4).textFieldStyle(.roundedBorder);TaskButton(title:"",symbol:"paperplane.fill"){let text=bodyText.trimmingCharacters(in:.whitespacesAndNewlines);guard !text.isEmpty,text.count<=2000 else{return};_ = try await api.table("comments",method:"POST",body:["post_id":post.id,"author_id":api.user.id,"body":text]);bodyText="";await load()}.disabled(bodyText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty).accessibilityLabel("إرسال التعليق")}.padding().background(.bar)}.navigationTitle("التعليقات").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.task{await load()}}
+    func load(reset:Bool=true)async {
+        do {
+            let r=try await api.table("comments",[q("select","id,body,author_id,created_at,profiles:profiles!comments_author_id_fkey(display_name)"),q("post_id","eq."+post.id),q("order","created_at.asc,id.asc"),q("limit","50"),q("offset",reset ? "0":String(rows.count))])
+            if reset {rows=r} else {rows += r};more=r.count==50;error=""
+        } catch {self.error=api.errorText(error)}
+    }
+    var body:some View {
+        List {
+            LoadError(text:error)
+            ForEach(rows) {r in
+                VStack(alignment:.leading,spacing:7) {
+                    Text(r.child("profiles").text("display_name")).font(.subheadline.bold())
+                    Text(r.text("body")).font(.subheadline)
+                    Text(dateValue(r.text("created_at")),style:.date).font(.caption2).foregroundStyle(.secondary)
+                }.swipeActions {
+                    if api.admin || r.text("author_id")==api.user.id {
+                        Button("حذف",role:.destructive) {
+                            Task {do {_ = try await api.table("comments",[q("id","eq."+r.id)],method:"DELETE");await load()} catch {self.error=api.errorText(error)}}
+                        }
+                    }
+                }
+            }
+            if more {TaskButton(title:"تعليقات أقدم"){await load(reset:false)}}
+        }.listStyle(.plain).scrollIndicators(.hidden)
+        .safeAreaInset(edge:.bottom) {
+            HStack {
+                TextField("أضف تعليقًا…",text:$bodyText,axis:.vertical).lineLimit(1...4).textFieldStyle(.roundedBorder)
+                TaskButton(title:"",symbol:"paperplane.fill") {
+                    let text=bodyText.trimmingCharacters(in:.whitespacesAndNewlines)
+                    guard !text.isEmpty,text.count<=2000 else{return}
+                    _ = try await api.table("comments",method:"POST",body:["post_id":post.id,"author_id":api.user.id,"body":text]);bodyText="";await load()
+                }.disabled(bodyText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty).accessibilityLabel("إرسال التعليق")
+            }.padding().background(.bar)
+        }.navigationTitle("التعليقات").navigationBarTitleDisplayMode(.inline)
+        .toolbar {ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}
+        .task {await load()}
+    }
 }
 struct PostEditor:View {
     @EnvironmentObject private var api:Backend
