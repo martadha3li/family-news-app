@@ -121,13 +121,13 @@ struct LaunchScreen:View {
         if hasSession{await open(api)}else{await api.restore()}
     }
     func afterPasswordLogin(_ api:Backend)async {
-        hasSession=true;guard !unlocked,!busy else{return}
+        hasSession=true;guard !unlocked,!busy,UIApplication.shared.applicationState == .active else{return}
         let probe=LAContext();var error:NSError?;let available=probe.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,error:&error);describe(probe)
         if !available{unlocked=true;message="";return} // The password has just been verified by the server.
         await open(api)
     }
     func open(_ api:Backend,automatic:Bool=true)async {
-        guard !starting,!busy,!unlocked,hasSession || api.signedIn,!(automatic && automaticAttempted) else{return}
+        guard !starting,!busy,!unlocked,hasSession || api.signedIn,!(automatic && automaticAttempted),UIApplication.shared.applicationState == .active else{return}
         automaticAttempted=true
         let identity=generation;let context=LAContext();self.context=context
         context.localizedCancelTitle="إلغاء";context.localizedFallbackTitle="";context.touchIDAuthenticationAllowableReuseDuration=0

@@ -5,6 +5,7 @@ source=(root/'App/FamilyNewsApp.swift').read_text()
 gate=source[source.index('@MainActor final class BiometricGate:'):source.index('struct BiometricLockScreen:')]
 stubs=r'''
 import Foundation
+@MainActor final class UIApplication {enum State {case active,background};static let shared=UIApplication();var applicationState=State.active}
 protocol ObservableObject {}
 @propertyWrapper struct Published<Value> {var wrappedValue:Value;init(wrappedValue:Value){self.wrappedValue=wrappedValue}}
 enum LAPolicy {case deviceOwnerAuthenticationWithBiometrics}
@@ -37,7 +38,7 @@ tests=r'''
 @MainActor func runChecks()async {
  let api=Backend();let gate=BiometricGate()
  await gate.start(api);precondition(gate.unlocked && api.restored==1 && LAContext.calls==1,"Cold start authenticates before restoring")
- gate.lock();precondition(!gate.unlocked);await gate.open(api);precondition(gate.unlocked && LAContext.calls==2,"Foreground return requires a fresh attempt")
+ gate.lock();precondition(!gate.unlocked);UIApplication.shared.applicationState = .background;await gate.open(api);precondition(LAContext.calls==1,"No biometric prompt in background");UIApplication.shared.applicationState = .active;await gate.open(api);precondition(gate.unlocked && LAContext.calls==2,"Foreground return requires a fresh attempt")
  gate.lock();LAContext.cancel=true;await gate.open(api);let calls=LAContext.calls;precondition(!gate.unlocked,"Cancel stays locked")
  await gate.open(api);precondition(LAContext.calls==calls,"Cancel must not trigger an automatic prompt loop")
  LAContext.cancel=false;await gate.open(api,automatic:false);precondition(gate.unlocked,"Explicit retry unlocks")
