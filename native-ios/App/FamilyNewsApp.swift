@@ -32,7 +32,7 @@ struct Avatar:View {let path:String;let name:String;var size:CGFloat=42;var body
 struct RootScreen:View {
     @EnvironmentObject private var api:Backend
     @Environment(\.scenePhase) private var phase
-    var body:some View{Group{if api.restoring{ProgressView("جاري فتح أخبار العائلة…")}else if !api.signedIn{LoginScreen()}else{HomeScreen()}}.task{await api.restore()}.onChange(of:phase){value in if value == .active,api.signedIn{Task{do{try await api.loadAccount()}catch{api.warning=api.errorText(error)}}}}}
+    var body:some View{Group{if api.restoring{ProgressView("جاري فتح أخبار العائلة…")}else if !api.signedIn{LoginScreen()}else{HomeScreen()}}.task{await api.restore()}.onChange(of:phase){_,value in if value == .active,api.signedIn{Task{do{try await api.loadAccount()}catch{api.warning=api.errorText(error)}}}}}
 }
 struct LoginScreen:View {
     @EnvironmentObject private var api:Backend
@@ -65,5 +65,5 @@ struct HomeScreen:View {
         if api.active{Color.clear.tabItem{Label("الدردشات",systemImage:"bubble.left.and.bubble.right")}.tag(1)}
         NavigationStack{ProfileScreen()}.tabItem{Label("حسابي",systemImage:"person.crop.circle")}.tag(2)
         NavigationStack{MoreScreen()}.tabItem{Label("المزيد",systemImage:"line.3.horizontal")}.tag(3)
-    }.onChange(of:selection){value in if value==1{selection=0;chats=true}}.fullScreenCover(isPresented:$chats){NavigationStack{ChatsScreen()}.environmentObject(api)} }
+    }.onChange(of:selection){_,value in if value==1{selection=0;chats=true}}.fullScreenCover(isPresented:$chats){NavigationStack{ChatsScreen()}.environmentObject(api)} }
 }

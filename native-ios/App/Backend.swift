@@ -33,7 +33,7 @@ enum CredentialStore {
     @Published var warning=""
     private var session:[String:Any]=[:]
     private var sessionGeneration=0
-    private var refreshTask:Task<[String:Any],Error>?
+    private var refreshTask:Task<Void,Error>?
     private let network:URLSession = { let c=URLSessionConfiguration.ephemeral; c.urlCache=nil; c.requestCachePolicy = .reloadIgnoringLocalCacheData; c.timeoutIntervalForRequest=30; return URLSession(configuration:c) }()
     var active:Bool { signedIn && profile.text("status")=="active" }
     var admin:Bool { active && profile.text("role")=="admin" }
@@ -68,8 +68,8 @@ enum CredentialStore {
         guard expiry<Date().timeIntervalSince1970+60 else {return}
         if let task=refreshTask {_ = try await task.value;return}
         let generation=sessionGeneration
-        let task=Task { () throws -> [String:Any] in
-            do {guard let fresh=try await self.request("/auth/v1/token?grant_type=refresh_token",method:"POST",body:["refresh_token":refresh],auth:false) as? [String:Any] else {throw FamilyError(text:"سجل دخولك مجددًا.")};guard generation==self.sessionGeneration else{throw CancellationError()};try Task.checkCancellation();try self.keep(fresh);return fresh}
+        let task=Task { () throws -> Void in
+            do {guard let fresh=try await self.request("/auth/v1/token?grant_type=refresh_token",method:"POST",body:["refresh_token":refresh],auth:false) as? [String:Any] else {throw FamilyError(text:"سجل دخولك مجددًا.")};guard generation==self.sessionGeneration else{throw CancellationError()};try Task.checkCancellation();try self.keep(fresh);return}
             catch {if (error as? FamilyError) != nil {self.clearSession()};throw error}
         };refreshTask=task
         defer{refreshTask=nil};_ = try await task.value
