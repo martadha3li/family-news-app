@@ -23,7 +23,7 @@ struct NewsScreen:View {
         if more && !posts.isEmpty{TaskButton(title:"عرض أخبار أقدم",symbol:"arrow.down"){await load(reset:false)}}
     }.padding(.horizontal,7).padding(.vertical,10).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).safeAreaInset(edge:.top,spacing:0){if scope == .published && !activeAds.isEmpty{AnnouncementTabs(ads:activeAds,open:{details=$0})}}.background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()};ToolbarItem(placement:.navigationBarLeading){NotificationBell{notifications=true}}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}}.task{await load(reset:true);while !Task.isCancelled{do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{break};now=Date()}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{AnnouncementDetails(ad:ad)}}}
 
-    var activeAds:[Item]{ads.filter{$0.flag("enabled") && dateValue($0.text("starts_at"))<=now && dateValue($0.text("ends_at"))>now}}
+    var activeAds:[Item]{ads.filter{!$0.flag("is_popup") && $0.flag("enabled") && dateValue($0.text("starts_at"))<=now && dateValue($0.text("ends_at"))>now}}
     func adColor(_ ad:Item)->Color{switch ad.text("category"){case "death":return .gray;case "urgent":return .red;case "wedding","donation":return brandPink;default:return brandBlue}}
     func load(reset:Bool)async{if loading{return};loading=true;defer{loading=false};do{var query=[q("select","*,profiles:profiles!posts_author_id_fkey(display_name,avatar_path),likes(count),comments(count)"),q("order","created_at.desc,id.desc"),q("limit","20"),q("offset",reset ? "0":String(posts.count))];switch scope{case .published:query += [q("published","eq.true"),q("deleted_at","is.null")];case .drafts:query += [q("published","eq.false"),q("author_id","eq."+api.user.id),q("deleted_at","is.null")];case .review:query += [q("moderation_status","eq.pending"),q("deleted_at","is.null")];case .hidden:query += [q("deleted_at","not.is.null")];case .mentioned:query += [q("mentioned_member_ids","cs.{"+api.user.id+"}"),q("published","eq.true"),q("deleted_at","is.null")]} ;let rows=try await api.table("posts",query);if reset{posts=rows}else{posts += rows};more=rows.count==20;error="";if scope == .published{ads=try await api.table("announcements",[q("select","*"),q("enabled","eq.true"),q("limit","200"),q("order","starts_at.desc")])}}catch{self.error=api.errorText(error)}}
 }
@@ -250,5 +250,28 @@ struct AnnouncementDetails:View {
         }.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}
         .task{let id=ad.text("contact_member_id");guard !id.isEmpty else{return};loading=true;defer{loading=false};do{contact=Item(try await api.action("account_action","directory_profile",["member":id]) as? [String:Any] ?? [:])}catch{self.error="جهة التواصل لم تعد متاحة."}}
         .fullScreenCover(item:$room){value in NavigationStack{ChatRoom(room:value).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){room=nil}}}}}
+    }
+}
+
+// Loaded once after account unlock; server controls per-account frequency and opt-out.
+struct PopupCampaign:Identifiable {let ad:Item;let image:UIImage;var id:String{ad.id}}
+struct PopupAdvertisement:View {
+    @EnvironmentObject private var api:Backend
+    @Environment(\.dismiss)private var dismiss
+    @Environment(\.scenePhase)private var phase
+    let campaign:PopupCampaign
+    @State private var remaining=0
+    @State private var hidden=false
+    @State private var warning=""
+    var body:some View {
+        ZStack{Color.black.ignoresSafeArea();Image(uiImage:campaign.image).resizable().scaledToFit().frame(maxWidth:.infinity,maxHeight:.infinity).accessibilityLabel(campaign.ad.text("title"))}
+        .safeAreaInset(edge:.top){HStack{Text("إعلان دعائي · \(remaining) ث").font(.caption.weight(.semibold));Spacer();Button{dismiss()}label:{Image(systemName:"xmark").font(.title3.bold()).frame(width:48,height:48)}.accessibilityLabel("إغلاق الإعلان فورًا")}.foregroundStyle(.white).padding(.horizontal,16).background(.black.opacity(0.75))}
+        .safeAreaInset(edge:.bottom){VStack{Toggle("عدم إظهار هذا الإعلان مرة أخرى",isOn:$hidden).tint(brandPink);if !warning.isEmpty{Text(warning).font(.caption)}}.foregroundStyle(.white).padding(20).background(.black.opacity(0.85))}
+        .onChange(of:hidden){_,value in
+            let key="promo-hidden-"+api.user.id+"-"+campaign.id;UserDefaults.standard.set(value,forKey:key)
+            Task{do{_ = try await api.rpc("promo_hide",["ad_id":Int(campaign.id) ?? 0,"hide":value]);warning=""}catch{warning="تعذّر مزامنة التفضيل. حُفظ على هذا الجهاز."}}
+        }
+        .task{remaining=max(1,campaign.ad.number("display_seconds"));while remaining>0{do{try await Task.sleep(nanoseconds:1_000_000_000)}catch{return};if phase == .active{remaining-=1}};dismiss()}
+        .privacySensitive()
     }
 }

@@ -83,13 +83,30 @@ struct LoginScreen:View {
 struct HomeScreen:View {
     @EnvironmentObject private var api:Backend
     @State private var selection=0
+    @State private var campaign:PopupCampaign?
+    @State private var checkedCampaign=false
     @State private var chats=false
     @State private var notifications=false
     var body:some View{TabView(selection:$selection){NavigationStack{if api.active{NewsScreen()}else{VStack(spacing:20){Image(systemName:"person.badge.clock").font(.largeTitle);Text(api.profile.text("status")=="suspended" ? "الحساب موقوف مؤقتًا":"حسابك بانتظار الاعتماد").font(.title3);TaskButton(title:"تحديث حالة الحساب",symbol:"arrow.clockwise"){try await api.loadAccount()};NavigationLink("إكمال ملفي"){ProfileScreen()}}.padding()}}.tabItem{Label("الأخبار",systemImage:"house")}.tag(0)
         if api.active{Color.clear.tabItem{Label("الدردشات",systemImage:"bubble.left.and.bubble.right")}.tag(1)}
         NavigationStack{ProfileScreen()}.tabItem{Label("حسابي",systemImage:"person.crop.circle")}.tag(2)
         NavigationStack{MoreScreen()}.tabItem{Label("المزيد",systemImage:"line.3.horizontal")}.tag(3)
-    }.onReceive(NotificationCenter.default.publisher(for:.openFamilyNotifications)){_ in if api.active{chats=false;notifications=true}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.onChange(of:selection){_,value in if value==1{selection=0;chats=true}}.fullScreenCover(isPresented:$chats){NavigationStack{ChatsScreen()}.environmentObject(api)} }
+    }.task(id:api.active){
+        guard api.active,!checkedCampaign else{return};checkedCampaign=true
+        let owner=api.user.id
+        do{
+            let ads=try await api.table("announcements",[q("select","*"),q("is_popup","eq.true"),q("enabled","eq.true"),q("starts_at","lte."+ISO8601DateFormatter().string(from:Date())),q("ends_at","gt."+ISO8601DateFormatter().string(from:Date())),q("order","starts_at.desc,id.desc"),q("limit","200")])
+            for ad in ads{
+                try Task.checkCancellation()
+                let key="promo-hidden-"+owner+"-"+ad.id
+                if UserDefaults.standard.bool(forKey:key){_ = try? await api.rpc("promo_hide",["ad_id":Int(ad.id) ?? 0,"hide":true]);continue}
+                guard let image=UIImage(data:try await api.signedData(bucket:"ad-images",path:ad.text("image_path"))) else{continue}
+                let claim=try await api.rpc("promo_claim",["ad_id":Int(ad.id) ?? 0]) as? Bool ?? false
+                guard api.user.id==owner,api.active,!Task.isCancelled else{return}
+                if claim{campaign=PopupCampaign(ad:ad,image:image);break}
+            }
+        }catch{}
+    }.fullScreenCover(item:$campaign){item in PopupAdvertisement(campaign:item).environmentObject(api)}.onReceive(NotificationCenter.default.publisher(for:.openFamilyNotifications)){_ in if api.active{chats=false;notifications=true}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.onChange(of:selection){_,value in if value==1{selection=0;chats=true}}.fullScreenCover(isPresented:$chats){NavigationStack{ChatsScreen()}.environmentObject(api)} }
 }
 
 struct LaunchScreen:View {

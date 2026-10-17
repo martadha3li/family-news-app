@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 struct SettingsScreen:View {
     @EnvironmentObject private var api:Backend
@@ -49,9 +50,28 @@ struct AdEditor:View {
     @State private var term=""
     @State private var people:[Item]=[]
     @State private var searchError=""
+    @State private var popup=false
+    @State private var seconds=8
+    @State private var days=1
+    @State private var imagePath=""
+    @State private var promoPhoto:PhotosPickerItem?
+    @State private var promoData:Data?
+    @State private var photoError=""
+    @State private var loadingPhoto=false
     var body:some View {
         Form{
             Section("الإعلان"){TextField("عنوان الإعلان",text:$title);TextField("التفاصيل",text:$bodyText,axis:.vertical).lineLimit(3...10);Picker("النوع",selection:$category){Text("عام").tag("general");Text("زواج").tag("wedding");Text("وفاة").tag("death");Text("تجاري").tag("commercial");Text("عاجل").tag("urgent");Text("تبرع").tag("donation")};DatePicker("بداية العرض",selection:$start);DatePicker("نهاية العرض",selection:$end);Toggle("مفعّل",isOn:$enabled)}
+            Section("إعلان دعائي بعد الدخول"){
+                Toggle("صورة على كامل الشاشة",isOn:$popup)
+                if popup{
+                    if let data=promoData,let image=UIImage(data:data){Image(uiImage:image).resizable().scaledToFit().frame(maxHeight:240)}else if !imagePath.isEmpty{PrivateImage(path:imagePath,bucket:"ad-images",fill:false).frame(height:240)}
+                    PhotosPicker(selection:$promoPhoto,matching:.images){Label("اختيار صورة الإعلان",systemImage:"photo")}
+                    if loadingPhoto{ProgressView()};LoadError(text:photoError)
+                    Stepper("مدة العرض: \(seconds) ثانية",value:$seconds,in:1...300)
+                    Stepper("يتكرر كل \(days) يوم",value:$days,in:1...3650)
+                    Text("يمكن إغلاقه فورًا بعلامة × أو اختيار عدم إظهاره مجددًا. تُحفظ رغبة العضو في حسابه. الصورة كاملة دون قص.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section("تواصل مع المعني بالإعلان · اختياري"){
                 if !contactID.isEmpty{Label("@"+(contactName.isEmpty ? "العضو المحدد":contactName),systemImage:"person.crop.circle.fill");Button("إزالة جهة التواصل",role:.destructive){contactID="";contactName=""}}
                 Button("أنا المعني بالإعلان"){contactID=api.user.id;contactName=api.profile.text("display_name");people=[];term=""}
@@ -62,12 +82,17 @@ struct AdEditor:View {
             }
             TaskButton(title:"حفظ الإعلان",symbol:"checkmark"){
                 guard title.count>=3,title.count<=250,!bodyText.isEmpty,bodyText.count<=5000,end>start else{throw FamilyError(text:"تحقق من العنوان والتفاصيل وفترة العرض.")}
-                var values:[String:Any]=["title":title,"body":bodyText,"category":category,"starts_at":ISO8601DateFormatter().string(from:start),"ends_at":ISO8601DateFormatter().string(from:end),"enabled":enabled,"contact_member_id":contactID.isEmpty ? NSNull():contactID as Any]
-                let rows:[Item];if let ad=ad{rows=try await api.table("announcements",[q("id","eq."+ad.id)],method:"PATCH",body:values)}else{values["author_id"]=api.user.id;rows=try await api.table("announcements",method:"POST",body:values)}
+                guard !loadingPhoto else{throw FamilyError(text:"انتظر تجهيز الصورة.")}
+                if popup && promoData==nil && imagePath.isEmpty{throw FamilyError(text:"اختر صورة الإعلان الدعائي.")}
+                var uploaded:String?
+                if popup,let data=promoData{let path=try await api.upload(data,bucket:"ad-images",preserveAspect:true);uploaded=path}
+                var values:[String:Any]=["is_popup":popup,"image_path":(uploaded ?? imagePath).isEmpty ? NSNull():(uploaded ?? imagePath) as Any,"display_seconds":seconds,"repeat_days":days,"title":title,"body":bodyText,"category":category,"starts_at":ISO8601DateFormatter().string(from:start),"ends_at":ISO8601DateFormatter().string(from:end),"enabled":enabled,"contact_member_id":contactID.isEmpty ? NSNull():contactID as Any]
+                do{let rows:[Item];if let ad=ad{rows=try await api.table("announcements",[q("id","eq."+ad.id)],method:"PATCH",body:values)}else{values["author_id"]=api.user.id;rows=try await api.table("announcements",method:"POST",body:values)}
                 guard !rows.isEmpty else{throw FamilyError(text:"لم يُحفظ الإعلان. تحقق من صلاحياتك.")};await saved();dismiss()
+                }catch{if let path=uploaded{_ = try? await api.request("/storage/v1/object/ad-images",method:"DELETE",body:["prefixes":[path]])};throw error}
             }
-        }.navigationTitle("إعلان العائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.task{
-            if let ad=ad{title=ad.text("title");bodyText=ad.text("body");category=ad.text("category");start=dateValue(ad.text("starts_at"));end=dateValue(ad.text("ends_at"));enabled=ad.flag("enabled");contactID=ad.text("contact_member_id");if !contactID.isEmpty{contactName=((try? await api.table("profiles",[q("select","display_name"),q("id","eq."+contactID)]))?.first?.text("display_name")) ?? ""}}
+        }.onChange(of:promoPhoto){_,item in Task{loadingPhoto=true;defer{loadingPhoto=false};do{guard let data=try await item?.loadTransferable(type:Data.self),data.count<=20*1024*1024,UIImage(data:data) != nil else{throw FamilyError(text:"اختر صورة صالحة أقل من 20 ميجابايت.")};promoData=data;photoError=""}catch{photoError=api.errorText(error)}}}.navigationTitle("إعلان العائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.task{
+            if let ad=ad{title=ad.text("title");bodyText=ad.text("body");category=ad.text("category");start=dateValue(ad.text("starts_at"));end=dateValue(ad.text("ends_at"));enabled=ad.flag("enabled");popup=ad.flag("is_popup");seconds=ad.number("display_seconds");days=ad.number("repeat_days");imagePath=ad.text("image_path");contactID=ad.text("contact_member_id");if !contactID.isEmpty{contactName=((try? await api.table("profiles",[q("select","display_name"),q("id","eq."+contactID)]))?.first?.text("display_name")) ?? ""}}
         }
     }
 }
