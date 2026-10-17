@@ -18,7 +18,7 @@ struct ProfileScreen:View {
     @State private var referees:[Item]=[]
     @State private var photo:PhotosPickerItem?
     var body:some View{Form{Section{VStack(spacing:10){Avatar(path:api.profile.text("avatar_path"),name:api.profile.text("display_name"),size:88);PhotosPicker(selection:$photo,matching:.images){Label("تغيير صورة العرض",systemImage:"camera")};Text(api.profile.text("display_name")).font(.headline);Text(api.user.text("email")).font(.caption).foregroundStyle(.secondary);Text(api.active ? "عضو معتمد":"بانتظار الاعتماد").font(.caption).foregroundStyle(brandBlue)}.frame(maxWidth:.infinity).padding(.vertical,10)};LoadError(text:error);if !notice.isEmpty{Text(notice).foregroundStyle(brandBlue)}
-        Section("نبذة عني · Bio"){TextField("اكتب نبذة قصيرة عنك…",text:$bio,axis:.vertical).lineLimit(3...6);Text("\(bio.count) / 300").font(.caption).foregroundStyle(bio.count>300 ? .red:.secondary);TaskButton(title:"حفظ النبذة",symbol:"checkmark"){guard bio.count<=300 else{throw FamilyError(text:"النبذة 300 حرف كحد أقصى.")};_ = try await api.action("account_action","bio",["bio":bio]);try await api.loadAccount();notice="حُفظت النبذة."}}
+        Section("نبذة عني · Bio"){TextField("اكتب نبذة قصيرة عنك…",text:$bio,axis:.vertical).lineLimit(3...6);Text("\(bio.count) / 300").font(.caption).foregroundStyle(bio.count>300 ? Color.red:Color.secondary);TaskButton(title:"حفظ النبذة",symbol:"checkmark"){guard bio.count<=300 else{throw FamilyError(text:"النبذة 300 حرف كحد أقصى.")};_ = try await api.action("account_action","bio",["bio":bio]);try await api.loadAccount();notice="حُفظت النبذة."}}
         Section("بياناتي"){TextField("الاسم الرباعي",text:$full);TextField("رقم الجوال",text:$mobile).keyboardType(.phonePad).disabled(!api.profile.text("phone").isEmpty);Picker("الجنس",selection:$gender){Text("اختر").tag("");Text("ذكر").tag("male");Text("أنثى").tag("female")}.disabled(!api.profile.text("gender").isEmpty);if gender=="female"{TextField("اسم المعرّف أو بداية رقم جواله",text:$reference).task(id:reference){do{try await Task.sleep(nanoseconds:250_000_000);guard !reference.isEmpty else{referees=[];return};let r=Item.items(try await api.action("family_action","referees",["term":reference]));try Task.checkCancellation();referees=r}catch{}};ForEach(referees){p in Button(p.text("display_name")){reference=p.text("display_name");referees=[]}};Picker("صلة القرابة",selection:$relation){Text("اختر").tag("");ForEach(options.filter{$0.flag("for_reference") && $0.flag("enabled") || $0.text("code")==relation},id:\.rawCode){o in Text(o.text("label")).tag(o.text("code"))}}};TaskButton(title:"حفظ بياناتي",symbol:"checkmark"){guard full.split(whereSeparator:{$0.isWhitespace}).count==4 else{throw FamilyError(text:"أدخل الاسم الرباعي.")};_ = try await api.rpc("profile_save",["data":["full_name":full,"display_name":full,"phone":try phone(mobile),"gender":gender,"reference_name":reference,"relationship":relation]]);try await api.loadAccount();notice="حُفظت بياناتك."}}
         Section("الحساب والأمان"){TaskButton(title:"تغيير كلمة المرور عبر البريد",symbol:"key"){try await api.recover();notice="أرسلنا رابط تأكيد البريد لتغيير كلمة المرور."};TextField("البريد الجديد",text:$email).textInputAutocapitalization(.never).keyboardType(.emailAddress);TaskButton(title:"إرسال تأكيد تغيير البريد",symbol:"envelope"){guard email.contains("@") else{throw FamilyError(text:"أدخل البريد الجديد.")};_ = try await api.request("/auth/v1/user?redirect_to="+api.website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"PUT",body:["email":email]);notice="راجع رسائل التأكيد في البريد القديم والجديد."};TextField("رقم جوال جديد",text:$newPhone).keyboardType(.phonePad);TaskButton(title:"طلب تغيير الجوال من المدير",symbol:"iphone"){_ = try await api.action("account_action","phone_request",["phone":try phone(newPhone)]);newPhone="";notice="وصل طلبك للمدير."}}
         if api.active{Section("نشاطي والعائلة"){NavigationLink("أخبار ذُكرت فيها"){NewsScreen(scope:.mentioned)};NavigationLink("أخباري وتعليقاتي وإعجاباتي"){ActivityScreen()};NavigationLink("شجرة عائلتي والأسماء المشابهة"){FamilyTreeScreen()}}};if api.profile.flag("endorsements_enabled"){NavigationLink("التعريف بالأعضاء"){EndorsementsScreen()}}
@@ -34,10 +34,25 @@ struct ActivityScreen:View {
     @State private var error=""
     let kinds=["posts","comments","mentions","likes"]
     func title(_ key:String)->String{switch key{case "posts":return "أخباري";case "comments":return "أخبار علّقت عليها";case "mentions":return "أخبار ذُكرت فيها";default:return "إعجاباتي"}}
-    var body:some View{List{LoadError(text:error);ForEach(kinds,id:\.self){key in Section(title(key)){ForEach(data.rows(key)){row in
-        NavigationLink{PostDestination(postID:row.text("post_id").isEmpty ? row.id:row.text("post_id"))}label:{VStack(alignment:.leading,spacing:7){Text(row.text("title")).font(.headline);if !row.text("body").isEmpty{Text(row.text("body")).font(.subheadline).lineLimit(2)};Text(dateValue(row.text("created_at")),style:.date).font(.caption).foregroundStyle(.secondary)}}
-        if data.rows(key).isEmpty{Text("لا توجد أخبار هنا بعد").font(.footnote).foregroundStyle(.secondary)}
-    }}}.scrollIndicators(.hidden).navigationTitle("نشاطي").task{do{data=Item(try await api.action("account_action","history") as? [String:Any] ?? [:])}catch{self.error=api.errorText(error)}}}
+    var body:some View {
+        List {
+            LoadError(text:error)
+            ForEach(kinds,id:\.self){key in
+                Section(title(key)){
+                    ForEach(data.rows(key)){row in
+                        NavigationLink{PostDestination(postID:row.text("post_id").isEmpty ? row.id:row.text("post_id"))}label:{
+                            VStack(alignment:.leading,spacing:7){
+                                Text(row.text("title")).font(.headline)
+                                if !row.text("body").isEmpty{Text(row.text("body")).font(.subheadline).lineLimit(2)}
+                                Text(dateValue(row.text("created_at")),style:.date).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if data.rows(key).isEmpty{Text("لا توجد أخبار هنا بعد").font(.footnote).foregroundStyle(.secondary)}
+                }
+            }
+        }.scrollIndicators(.hidden).navigationTitle("نشاطي").task{do{data=Item(try await api.action("account_action","history") as? [String:Any] ?? [:])}catch{self.error=api.errorText(error)}}
+    }
 }
 struct PostDestination:View {
     @EnvironmentObject private var api:Backend

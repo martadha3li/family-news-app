@@ -1,6 +1,6 @@
 import {execFileSync} from 'node:child_process';
 import {mkdirSync,writeFileSync} from 'node:fs';
-const adb=(...args)=>execFileSync('adb',args,{encoding:'utf8'}).trim();
+const adb=(...args)=>execFileSync('adb',args,{encoding:'utf8',maxBuffer:16*1024*1024}).trim();
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 mkdirSync('smoke-evidence',{recursive:true});
 adb('install','-r','apk/app-debug.apk');
@@ -24,7 +24,7 @@ const result=await new Promise((resolve,reject)=>{
  ws.onerror=()=>{clearTimeout(timer);reject(new Error('WebView connection failed'));};
 });
 writeFileSync('smoke-evidence/launch.json',JSON.stringify(result,null,2));
-writeFileSync('smoke-evidence/logcat.txt',adb('logcat','-d'));
+writeFileSync('smoke-evidence/logcat.txt',adb('logcat','-d','-t','2000'));
 execFileSync('adb',['shell','screencap','-p','/sdcard/launch.png']);
 adb('pull','/sdcard/launch.png','smoke-evidence/launch.png');
 if(!result.native||!result.login||!result.body.includes('أخبار العائلة'))throw new Error('Bundled login screen was not rendered');
