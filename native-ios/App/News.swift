@@ -21,7 +21,8 @@ struct NewsScreen:View {
         ForEach(posts){p in NativePost(post:p,edit:{editor=p},refresh:{await load(reset:true)},scope:scope)}
         if loading{ProgressView().padding()}
         if more && !posts.isEmpty{TaskButton(title:"عرض أخبار أقدم",symbol:"arrow.down"){await load(reset:false)}}
-    }.padding(.horizontal,7).padding(.vertical,10).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).safeAreaInset(edge:.top,spacing:0){if scope == .published && !activeAds.isEmpty{AnnouncementTabs(ads:activeAds,open:{details=$0})}}.background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()};ToolbarItem(placement:.navigationBarLeading){NotificationBell{notifications=true}}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}}.task{await load(reset:true);while !Task.isCancelled{do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{break};now=Date()}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{ScrollView{VStack(alignment:.leading,spacing:20){Text(ad.text("title")).font(.title2.bold());Text(ad.text("body"));Text("حتى \(dateValue(ad.text("ends_at")).formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)}.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){details=nil}}}}}}
+    }.padding(.horizontal,7).padding(.vertical,10).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).safeAreaInset(edge:.top,spacing:0){if scope == .published && !activeAds.isEmpty{AnnouncementTabs(ads:activeAds,open:{details=$0})}}.background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()};ToolbarItem(placement:.navigationBarLeading){NotificationBell{notifications=true}}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}}.task{await load(reset:true);while !Task.isCancelled{do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{break};now=Date()}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{AnnouncementDetails(ad:ad)}}}
+
     var activeAds:[Item]{ads.filter{$0.flag("enabled") && dateValue($0.text("starts_at"))<=now && dateValue($0.text("ends_at"))>now}}
     func adColor(_ ad:Item)->Color{switch ad.text("category"){case "death":return .gray;case "urgent":return .red;case "wedding","donation":return brandPink;default:return brandBlue}}
     func load(reset:Bool)async{if loading{return};loading=true;defer{loading=false};do{var query=[q("select","*,profiles:profiles!posts_author_id_fkey(display_name,avatar_path),likes(count),comments(count)"),q("order","created_at.desc,id.desc"),q("limit","20"),q("offset",reset ? "0":String(posts.count))];switch scope{case .published:query += [q("published","eq.true"),q("deleted_at","is.null")];case .drafts:query += [q("published","eq.false"),q("author_id","eq."+api.user.id),q("deleted_at","is.null")];case .review:query += [q("moderation_status","eq.pending"),q("deleted_at","is.null")];case .hidden:query += [q("deleted_at","not.is.null")];case .mentioned:query += [q("mentioned_member_ids","cs.{"+api.user.id+"}"),q("published","eq.true"),q("deleted_at","is.null")]} ;let rows=try await api.table("posts",query);if reset{posts=rows}else{posts += rows};more=rows.count==20;error="";if scope == .published{ads=try await api.table("announcements",[q("select","*"),q("enabled","eq.true"),q("limit","200"),q("order","starts_at.desc")])}}catch{self.error=api.errorText(error)}}
@@ -224,4 +225,30 @@ struct MentionBody:View {
         .sheet(item:$viewed){member in NavigationStack{MemberScreen(member:member.id).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){viewed=nil}}}}}
     }
     func memberButton(_ member:Item)->some View{Button("@"+member.text("display_name")){viewed=member}.font(.caption.weight(.semibold)).buttonStyle(.plain).foregroundStyle(brandBlue).lineLimit(1)}
+}
+
+struct AnnouncementDetails:View {
+    @EnvironmentObject private var api:Backend
+    @Environment(\.dismiss)private var dismiss
+    let ad:Item
+    @State private var contact=Item()
+    @State private var room:Room?
+    @State private var loading=false
+    @State private var error=""
+    var body:some View {
+        ScrollView{VStack(alignment:.leading,spacing:20){
+            Text(ad.text("title")).font(.title2.bold());Text(ad.text("body")).font(.body).textSelection(.enabled)
+            Text("حتى \(dateValue(ad.text("ends_at")).formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)
+            if loading{ProgressView("تحميل جهة التواصل…")}
+            LoadError(text:error)
+            if !contact.id.isEmpty{Divider();if contact.id==api.user.id{Label("أنت المعني بهذا الإعلان",systemImage:"person.crop.circle").font(.subheadline).foregroundStyle(.secondary)}else{
+                TaskButton(title:"تواصل مع @"+contact.text("display_name"),symbol:"bubble.left.and.bubble.right.fill"){
+                    guard let thread=try await api.rpc("chat_open",["other":contact.id]) as? String else{throw FamilyError(text:"تعذّر فتح المحادثة.")}
+                    room=Room(id:thread,title:contact.text("display_name"),thread:thread,avatar:contact.text("avatar_path"),peer:contact.id)
+                }.buttonStyle(.borderedProminent).controlSize(.large)
+            }}
+        }.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}
+        .task{let id=ad.text("contact_member_id");guard !id.isEmpty else{return};loading=true;defer{loading=false};do{contact=Item(try await api.action("account_action","directory_profile",["member":id]) as? [String:Any] ?? [:])}catch{self.error="جهة التواصل لم تعد متاحة."}}
+        .fullScreenCover(item:$room){value in NavigationStack{ChatRoom(room:value).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){room=nil}}}}}
+    }
 }

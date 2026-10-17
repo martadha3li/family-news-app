@@ -33,12 +33,44 @@ struct AdsAdminScreen:View {@EnvironmentObject private var api:Backend;@State pr
     @State private var error=""
     @State private var edit:Item?
     @State private var deleting:Item?;func load()async{do{ads=try await api.table("announcements",[q("select","*"),q("order","created_at.desc"),q("limit","2000")]);error=""}catch{self.error=api.errorText(error)}};var body:some View{List{LoadError(text:error);ForEach(ads){ad in Button{edit=ad}label:{VStack(alignment:.leading,spacing:6){Text(ad.text("title")).font(.headline);Text(ad.flag("enabled") ? "مفعّل":"متوقف").font(.caption);Text(dateValue(ad.text("starts_at")),style:.date).font(.caption).foregroundStyle(.secondary)}}.swipeActions{Button("حذف",role:.destructive){deleting=ad}}}}.navigationTitle("الإعلانات").toolbar{ToolbarItem(placement:.navigationBarTrailing){Button{edit=Item(["id":"new"])}label:{Image(systemName:"plus")}}}.task{await load()}.sheet(item:$edit){ad in NavigationStack{AdEditor(ad:ad.id=="new" ? nil:ad){await load()}}}.confirmationDialog("حذف الإعلان نهائيًا؟",isPresented:Binding(get:{deleting != nil},set:{if !$0{deleting=nil}})){Button("حذف",role:.destructive){guard let ad=deleting else{return};deleting=nil;Task{do{_ = try await api.table("announcements",[q("id","eq."+ad.id)],method:"DELETE");await load()}catch{self.error=api.errorText(error)}}}}}}
-struct AdEditor:View {@EnvironmentObject private var api:Backend;@Environment(\.dismiss)private var dismiss;let ad:Item?;let saved:()async->Void;@State private var title=""
+struct AdEditor:View {
+    @EnvironmentObject private var api:Backend
+    @Environment(\.dismiss)private var dismiss
+    let ad:Item?
+    let saved:()async->Void
+    @State private var title=""
     @State private var bodyText=""
     @State private var category="general"
     @State private var start=Date()
     @State private var end=Date().addingTimeInterval(86400)
-    @State private var enabled=true;var body:some View{Form{TextField("عنوان الإعلان",text:$title);TextField("التفاصيل",text:$bodyText,axis:.vertical).lineLimit(3...10);Picker("النوع",selection:$category){Text("عام").tag("general");Text("زواج").tag("wedding");Text("وفاة").tag("death");Text("تجاري").tag("commercial");Text("عاجل").tag("urgent");Text("تبرع").tag("donation")};DatePicker("بداية العرض",selection:$start);DatePicker("نهاية العرض",selection:$end);Toggle("مفعّل",isOn:$enabled);TaskButton(title:"حفظ الإعلان",symbol:"checkmark"){guard title.count>=3,title.count<=250,!bodyText.isEmpty,bodyText.count<=5000,end>start else{throw FamilyError(text:"تحقق من العنوان والتفاصيل وفترة العرض.")};var p:[String:Any]=["title":title,"body":bodyText,"category":category,"starts_at":ISO8601DateFormatter().string(from:start),"ends_at":ISO8601DateFormatter().string(from:end),"enabled":enabled];if let ad=ad{_ = try await api.table("announcements",[q("id","eq."+ad.id)],method:"PATCH",body:p)}else{p["author_id"]=api.user.id;_ = try await api.table("announcements",method:"POST",body:p)};await saved();dismiss()}}.navigationTitle("إعلان العائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.task{if let ad=ad{title=ad.text("title");bodyText=ad.text("body");category=ad.text("category");start=dateValue(ad.text("starts_at"));end=dateValue(ad.text("ends_at"));enabled=ad.flag("enabled")}}}}
+    @State private var enabled=true
+    @State private var contactID=""
+    @State private var contactName=""
+    @State private var term=""
+    @State private var people:[Item]=[]
+    @State private var searchError=""
+    var body:some View {
+        Form{
+            Section("الإعلان"){TextField("عنوان الإعلان",text:$title);TextField("التفاصيل",text:$bodyText,axis:.vertical).lineLimit(3...10);Picker("النوع",selection:$category){Text("عام").tag("general");Text("زواج").tag("wedding");Text("وفاة").tag("death");Text("تجاري").tag("commercial");Text("عاجل").tag("urgent");Text("تبرع").tag("donation")};DatePicker("بداية العرض",selection:$start);DatePicker("نهاية العرض",selection:$end);Toggle("مفعّل",isOn:$enabled)}
+            Section("تواصل مع المعني بالإعلان · اختياري"){
+                if !contactID.isEmpty{Label("@"+(contactName.isEmpty ? "العضو المحدد":contactName),systemImage:"person.crop.circle.fill");Button("إزالة جهة التواصل",role:.destructive){contactID="";contactName=""}}
+                Button("أنا المعني بالإعلان"){contactID=api.user.id;contactName=api.profile.text("display_name");people=[];term=""}
+                TextField("@ أو بداية اسم العضو",text:$term).task(id:term){do{try await Task.sleep(nanoseconds:200_000_000);try Task.checkCancellation();let rows=Item.items(try await api.rpc("mention_search",["term":term.replacingOccurrences(of:"@",with:"")]));try Task.checkCancellation();people=rows;searchError=""}catch{if !Task.isCancelled{searchError=api.errorText(error)}}}
+                LoadError(text:searchError)
+                ForEach(people){person in Button{contactID=person.id;contactName=person.text("display_name");people=[]}label:{Label(person.text("display_name"),systemImage:contactID==person.id ? "checkmark.circle.fill":"at")}}
+                Text("يفتح زر التواصل المحادثة الخاصة مباشرة، مع تطبيق ضوابط الدردشة الحالية.").font(.caption).foregroundStyle(.secondary)
+            }
+            TaskButton(title:"حفظ الإعلان",symbol:"checkmark"){
+                guard title.count>=3,title.count<=250,!bodyText.isEmpty,bodyText.count<=5000,end>start else{throw FamilyError(text:"تحقق من العنوان والتفاصيل وفترة العرض.")}
+                var values:[String:Any]=["title":title,"body":bodyText,"category":category,"starts_at":ISO8601DateFormatter().string(from:start),"ends_at":ISO8601DateFormatter().string(from:end),"enabled":enabled,"contact_member_id":contactID.isEmpty ? NSNull():contactID as Any]
+                let rows:[Item];if let ad=ad{rows=try await api.table("announcements",[q("id","eq."+ad.id)],method:"PATCH",body:values)}else{values["author_id"]=api.user.id;rows=try await api.table("announcements",method:"POST",body:values)}
+                guard !rows.isEmpty else{throw FamilyError(text:"لم يُحفظ الإعلان. تحقق من صلاحياتك.")};await saved();dismiss()
+            }
+        }.navigationTitle("إعلان العائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.task{
+            if let ad=ad{title=ad.text("title");bodyText=ad.text("body");category=ad.text("category");start=dateValue(ad.text("starts_at"));end=dateValue(ad.text("ends_at"));enabled=ad.flag("enabled");contactID=ad.text("contact_member_id");if !contactID.isEmpty{contactName=((try? await api.table("profiles",[q("select","display_name"),q("id","eq."+contactID)]))?.first?.text("display_name")) ?? ""}}
+        }
+    }
+}
 struct ImageCandidate:Identifiable {let info:Item;let data:Data;var id:String{info.text("bucket")+"/"+info.text("path")}}
 struct StorageScreen:View {
     @EnvironmentObject private var api:Backend
