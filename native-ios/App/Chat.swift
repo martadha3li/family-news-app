@@ -15,8 +15,13 @@ struct ChatsScreen:View {
     @EnvironmentObject private var api:Backend
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var phase
-    @State private var threads:[Item]=[],groups:[Item]=[],results:[Item]=[]
-    @State private var settings=Item(),search="",error="",create=false
+    @State private var threads:[Item]=[]
+    @State private var groups:[Item]=[]
+    @State private var results:[Item]=[]
+    @State private var settings=Item()
+    @State private var search=""
+    @State private var error=""
+    @State private var create=false
     @State private var destination:Room?
     var body:some View{List{LoadError(text:error);if !settings.flag("chat_enabled"){EmptyState(title:"الدردشة موقوفة من المدير",symbol:"bubble.left.and.exclamationmark.bubble.right")}else{
         if !search.isEmpty{Section("نتائج البحث"){ForEach(results){person in TaskButton(title:person.text("display_name"),symbol:"person.crop.circle"){let value=try await api.rpc("chat_open",["other":person.id]);guard let thread=value as? String else{throw FamilyError(text:"تعذّر فتح المحادثة.")};destination=Room(id:thread,title:person.text("display_name"),thread:thread,avatar:person.text("avatar_path"),peer:person.id)}};if results.isEmpty{Text("لا توجد أسماء مطابقة").foregroundStyle(.secondary)}}}
@@ -31,9 +36,18 @@ struct ChatRoom:View {
     @EnvironmentObject private var api:Backend
     @Environment(\.scenePhase) private var phase
     let room:Room
-    @State private var messages:[Item]=[],bodyText="",error="",search=""
-    @State private var searchMode=false,more=true,sending=false,loading=false,details=false
-    @State private var reply:Item?,editing:Item?,deleting:Item?
+    @State private var messages:[Item]=[]
+    @State private var bodyText=""
+    @State private var error=""
+    @State private var search=""
+    @State private var searchMode=false
+    @State private var more=true
+    @State private var sending=false
+    @State private var loading=false
+    @State private var details=false
+    @State private var reply:Item?
+    @State private var editing:Item?
+    @State private var deleting:Item?
     @State private var open=true
     @FocusState private var focused:Bool
     var body:some View{VStack(spacing:0){if searchMode{TextField("بحث في الرسائل",text:$search).textFieldStyle(.roundedBorder).padding(10)};LoadError(text:error)
@@ -47,15 +61,67 @@ struct CreateGroupScreen:View {
     @EnvironmentObject private var api:Backend
     @Environment(\.dismiss)private var dismiss
     let created:(Room)->Void
-    @State private var title="",term="",kind="group",members:[Item]=[],results:[Item]=[],start=Date(),end=Date().addingTimeInterval(3600)
+    @State private var title=""
+    @State private var term=""
+    @State private var kind="group"
+    @State private var members:[Item]=[]
+    @State private var results:[Item]=[]
+    @State private var start=Date()
+    @State private var end=Date().addingTimeInterval(3600)
     var body:some View{Form{Section{TextField("اسم المجموعة",text:$title);if api.admin{Picker("النوع",selection:$kind){Text("مجموعة").tag("group");Text("حدث محدد").tag("event")}};if kind=="event"{DatePicker("البداية",selection:$start);DatePicker("النهاية",selection:$end)}};Section("إضافة أعضاء"){TextField("الاسم أو رقم الجوال",text:$term).task(id:term){do{try await Task.sleep(nanoseconds:250_000_000);guard !term.isEmpty else{results=[];return};let r=Item.items(try await api.rpc("chat_search",["term":term]));try Task.checkCancellation();results=r}catch{}};ForEach(results){p in Button{if members.contains(where:{$0.id==p.id}){members.removeAll{$0.id==p.id}}else if members.count<200{members.append(p)}}label:{Label(p.text("display_name"),systemImage:members.contains(where:{$0.id==p.id}) ? "checkmark.circle.fill":"circle")}};Text("المحددون: \(members.count)").font(.caption)};Section{TaskButton(title:"إنشاء",symbol:"plus"){guard title.count>=3,title.count<=100 else{throw FamilyError(text:"اسم المجموعة من 3 إلى 100 حرف.")};var p:[String:Any]=["title":title,"kind":kind,"members":members.map(\.id)];if kind=="event"{guard end>start else{throw FamilyError(text:"نهاية الحدث بعد بدايته.")};p["starts_at"]=ISO8601DateFormatter().string(from:start);p["ends_at"]=ISO8601DateFormatter().string(from:end)};guard let id=try await api.action("group_action","create",p) as? String else{throw FamilyError(text:"تعذّر إنشاء المجموعة.")};created(Room(id:id,title:title,group:id,owner:api.user.id));dismiss()}}}.scrollIndicators(.hidden).navigationTitle("محادثة جديدة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}}
 }
 struct GroupDetails:View {
-    @EnvironmentObject private var api:Backend;@Environment(\.dismiss)private var dismiss;let room:Room
-    @State private var members:[Item]=[],results:[Item]=[],term="",error=""
-    var manager:Bool{api.admin || room.owner==api.user.id}
-    func load()async{do{members=Item.items(try await api.action("group_action","members",["id":room.id]));error=""}catch{self.error=api.errorText(error)}}
-    var body:some View{List{LoadError(text:error);Section("الأعضاء"){ForEach(members){p in NavigationLink{MemberScreen(member:p.id)}label:{Text(p.text("display_name"))}.swipeActions{if manager && p.id != room.owner{Button("إزالة",role:.destructive){Task{do{_ = try await api.action("group_action","remove",["id":room.id,"member":p.id]);await load()}catch{self.error=api.errorText(error)}}}}}};if manager{Section("إضافة عضو"){TextField("الاسم أو رقم الجوال",text:$term).task(id:term){do{try await Task.sleep(nanoseconds:250_000_000);guard !term.isEmpty else{results=[];return};let r=Item.items(try await api.rpc("chat_search",["term":term]));try Task.checkCancellation();results=r}catch{}};ForEach(results){p in TaskButton(title:p.text("display_name"),symbol:"person.badge.plus"){_ = try await api.action("group_action","add",["id":room.id,"member":p.id]);await load()}}}};if room.owner != api.user.id{TaskButton(title:"مغادرة المجموعة",symbol:"rectangle.portrait.and.arrow.right"){_ = try await api.action("group_action","leave",["id":room.id]);dismiss()}}}.navigationTitle(room.title).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.task{await load()}}
-}
-
+    @EnvironmentObject private var api:Backend
+    @Environment(\.dismiss) private var dismiss
+    let room:Room
+    @State private var members:[Item]=[]
+    @State private var results:[Item]=[]
+    @State private var term=""
+    @State private var error=""
+    var manager:Bool {api.admin || room.owner==api.user.id}
+    func load()async {
+        do {members=Item.items(try await api.action("group_action","members",["id":room.id]));error=""}
+        catch {self.error=api.errorText(error)}
+    }
+    var body:some View {
+        List {
+            LoadError(text:error)
+            Section("الأعضاء") {
+                ForEach(members) {p in
+                    NavigationLink {MemberScreen(member:p.id)} label: {Text(p.text("display_name"))}
+                    .swipeActions {
+                        if manager && p.id != room.owner {
+                            Button("إزالة",role:.destructive) {
+                                Task {do {_ = try await api.action("group_action","remove",["id":room.id,"member":p.id]);await load()} catch {self.error=api.errorText(error)}}
+                            }
+                        }
+                    }
+                }
+            }
+            if manager {
+                Section("إضافة عضو") {
+                    TextField("الاسم أو رقم الجوال",text:$term)
+                        .task(id:term) {
+                            do {
+                                try await Task.sleep(nanoseconds:250_000_000)
+                                guard !term.isEmpty else{results=[];return}
+                                let r=Item.items(try await api.rpc("chat_search",["term":term]));try Task.checkCancellation();results=r
+                            } catch {}
+                        }
+                    ForEach(results) {p in
+                        TaskButton(title:p.text("display_name"),symbol:"person.badge.plus") {
+                            _ = try await api.action("group_action","add",["id":room.id,"member":p.id]);await load()
+                        }
+                    }
+                }
+            }
+            if room.owner != api.user.id {
+                TaskButton(title:"مغادرة المجموعة",symbol:"rectangle.portrait.and.arrow.right") {
+                    _ = try await api.action("group_action","leave",["id":room.id]);dismiss()
+                }
+            }
+        }.navigationTitle(room.title)
+        .toolbar {ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}
+        .task {await load()}
+    }
 }

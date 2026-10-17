@@ -1,15 +1,19 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 enum NewsScope:String,CaseIterable {case published="الأخبار",drafts="مسوداتي",review="مراجعة الأخبار",hidden="الأخبار المخفية",mentioned="أخبار ذُكرت فيها"}
 struct NewsScreen:View {
     @EnvironmentObject private var api:Backend
     var scope:NewsScope = .published
-    @State private var posts:[Item]=[],ads:[Item]=[]
+    @State private var posts:[Item]=[]
+    @State private var ads:[Item]=[]
     @State private var error=""
     @State private var now=Date()
-    @State private var loading=false,more=true
-    @State private var editor:Item?,details:Item?
+    @State private var loading=false
+    @State private var more=true
+    @State private var editor:Item?
+    @State private var details:Item?
     var body:some View{ScrollView{LazyVStack(spacing:18){if scope == .published{ForEach(activeAds){ad in Button{details=ad}label:{HStack{Image(systemName:ad.text("category")=="death" ? "leaf":"megaphone");Text(ad.text("title")).font(.subheadline.bold());Spacer();Image(systemName:"chevron.left").font(.caption)}.foregroundStyle(adColor(ad)).padding(14).background(adColor(ad).opacity(0.08),in:RoundedRectangle(cornerRadius:14))}.padding(.horizontal)}}
         LoadError(text:error)
         if posts.isEmpty && !loading{EmptyState(title:"لا توجد أخبار هنا بعد",symbol:"newspaper")}
@@ -29,7 +33,8 @@ struct NativePost:View {
     var scope:NewsScope
     @State private var liked=false
     @State private var count=0
-    @State private var comments=false,confirmDelete=false
+    @State private var comments=false
+    @State private var confirmDelete=false
     @State private var issue=""
     var editable:Bool{api.admin || (api.writer && post.text("author_id")==api.user.id)}
     var body:some View{VStack(alignment:.leading,spacing:0){HStack(spacing:10){Avatar(path:post.child("profiles").text("avatar_path"),name:post.child("profiles").text("display_name"));VStack(alignment:.leading,spacing:3){Text(post.child("profiles").text("display_name")).font(.subheadline.weight(.semibold));Text(dateValue(post.text("created_at")),style:.date).font(.caption2).foregroundStyle(.secondary)};Spacer();if editable{Menu{Button("تعديل الخبر",systemImage:"pencil"){edit()};Button(scope == .hidden ? "استعادة الخبر":"إخفاء الخبر",systemImage:scope == .hidden ? "arrow.uturn.backward":"eye.slash"){Task{do{_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["deleted_at":scope == .hidden ? NSNull():ISO8601DateFormatter().string(from:Date())]);await refresh()}catch{issue=api.errorText(error)}}};if api.admin{Button("حذف نهائي",systemImage:"trash",role:.destructive){confirmDelete=true}}}label:{Image(systemName:"ellipsis").frame(width:44,height:44)}}}.padding(.horizontal,14).padding(.vertical,10)
@@ -43,7 +48,9 @@ struct CommentsScreen:View {
     @EnvironmentObject private var api:Backend
     @Environment(\.dismiss) private var dismiss
     let post:Item
-    @State private var rows:[Item]=[],bodyText="",error=""
+    @State private var rows:[Item]=[]
+    @State private var bodyText=""
+    @State private var error=""
     @State private var more=true
     func load(reset:Bool=true)async {
         do {
@@ -88,9 +95,14 @@ struct PostEditor:View {
     @Environment(\.dismiss) private var dismiss
     let post:Item?
     let saved:()async->Void
-    @State private var title:String,bodyText:String,publish:Bool
-    @State private var photo:PhotosPickerItem?,imageData:Data?
-    @State private var search="",people:[Item]=[],selected:[Item]=[]
+    @State private var title:String
+    @State private var bodyText:String
+    @State private var publish:Bool
+    @State private var photo:PhotosPickerItem?
+    @State private var imageData:Data?
+    @State private var search=""
+    @State private var people:[Item]=[]
+    @State private var selected:[Item]=[]
     @State private var imageError=""
     init(post:Item?,saved:@escaping ()async->Void){self.post=post;self.saved=saved;_title=State(initialValue:post?.text("title") ?? "");_bodyText=State(initialValue:post?.text("body") ?? "");_publish=State(initialValue:post?.flag("published") ?? true)}
     var body:some View{Form{Section("الخبر"){TextField("عنوان الخبر",text:$title);TextField("التفاصيل",text:$bodyText,axis:.vertical).lineLimit(5...15);Toggle("نشر الخبر الآن",isOn:$publish)};Section("الصورة"){PhotosPicker(selection:$photo,matching:.images){Label("اختيار صورة",systemImage:"photo")}.disabled(post != nil && post?.text("author_id") != api.user.id);if let data=imageData,let img=UIImage(data:data){Image(uiImage:img).resizable().scaledToFit().frame(maxHeight:240)};LoadError(text:imageError);Text("تُضغط الصورة قبل الرفع وتُعرض بإطار 4:5.").font(.caption).foregroundStyle(.secondary)};Section("منشن لأعضاء العائلة"){TextField("ابحث بالاسم",text:$search).task(id:search){do{try await Task.sleep(nanoseconds:250_000_000);try Task.checkCancellation();guard search.count>=2 else{people=[];return};let r=try await api.table("profiles",[q("select","id,display_name"),q("status","eq.active"),q("display_name","ilike.*"+search.replacingOccurrences(of:"*",with:"")+"*"),q("limit","20")]);try Task.checkCancellation();people=r}catch{}};ForEach(people){p in Button{if selected.count<20 && !selected.contains(where:{$0.id==p.id}){selected.append(p)}}label:{Label(p.text("display_name"),systemImage:selected.contains(where:{$0.id==p.id}) ? "checkmark.circle.fill":"at")}};ForEach(selected){p in Button(role:.destructive){selected.removeAll{$0.id==p.id}}label:{Label(p.text("display_name"),systemImage:"minus.circle")}}};Section{TaskButton(title:"حفظ الخبر",symbol:"checkmark"){guard api.writer,title.trimmingCharacters(in:.whitespaces).count>=3,title.count<=250,!bodyText.trimmingCharacters(in:.whitespaces).isEmpty,bodyText.count<=20000 else{throw FamilyError(text:"أدخل عنوانًا صالحًا وتفاصيل الخبر.")};var values:[String:Any]=["title":title,"body":bodyText,"published":publish,"mentioned_member_ids":selected.map(\.id)];var uploaded:String?;do{if let data=imageData{uploaded=try await api.upload(data,bucket:"news-images");values["image_path"]=uploaded};if let p=post{_ = try await api.table("posts",[q("id","eq."+p.id)],method:"PATCH",body:values)}else{values["author_id"]=api.user.id;_ = try await api.table("posts",method:"POST",body:values)}}catch{if let path=uploaded{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":[path]])};throw error};await saved();dismiss()}.disabled(!api.writer)}}.scrollIndicators(.hidden).scrollDismissesKeyboard(.interactively).navigationTitle(post==nil ? "خبر جديد":"تعديل الخبر").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onChange(of:photo){item in Task{do{guard let data=try await item?.loadTransferable(type:Data.self),data.count<=20*1024*1024,UIImage(data:data) != nil else{throw FamilyError(text:"اختر صورة صالحة أقل من 20 ميجابايت.")};imageData=data;imageError=""}catch{imageError=api.errorText(error)}}}.task{if let ids=post?.raw["mentioned_member_ids"] as? [String],!ids.isEmpty{selected=(try? await api.table("profiles",[q("select","id,display_name"),q("id","in.("+ids.joined(separator:",")+")")])) ?? []}}}
