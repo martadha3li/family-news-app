@@ -23,6 +23,9 @@ expect(mentionToken("a@example.com",caret:13)==nil,"Email is not a mention")
 expect(mentionToken("مرحبا @أحمد ",caret:13)==nil,"Completed mention")
 let middle="@علي ثم باقي النص"
 expect(mentionToken(middle,caret:4)?.term=="علي","Caret in middle of text")
+for width in [280.0,320,390,768,1200] {for count in [1,2,3,5,10,50,200] {let fit=announcementFit(width:width,count:count);expect(fit.cell*Double(count)+fit.gap*Double(count-1)<=width-20+0.001,"All ads fit without scrolling")}}
+expect(!announcementFit(width:390,count:2).iconsOnly,"Two ads show titles")
+expect(announcementFit(width:320,count:5).iconsOnly,"Crowded ads become icons")
 let row=Item(["id":123,"body":NSNull(),"active":true,"count":9])
 expect(row.id=="123","Numeric message ID")
 expect(row.text("body")=="","JSON null")

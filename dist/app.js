@@ -1,6 +1,7 @@
+import {fitAnnouncements} from './announcement-layout.mjs';
 import {launchProgress,finishLaunch} from './launch.mjs';
 import {imagePaths,renderAlbum} from './albums.mjs';
-import {initInterface,presentButton} from './interface.mjs';
+import {initInterface,presentButton,icon} from './interface.mjs';
 import {initStorageAdmin} from './storage-admin.mjs';
 import {initNotifications} from './notifications.mjs';
 import {syncViewport} from './viewport.mjs';
@@ -89,7 +90,8 @@ function paintAnnouncements(){
  const now=Date.now(),box=$('announcement-strip');box.replaceChildren();
  const active=state.ads.filter(ad=>announcementState(ad,now)==='active');
  box.hidden=active.length===0;box.setAttribute('role','group');
- for(const ad of active){const card=button('',()=>showAdDetails(ad),'announcement-banner ad-'+(ad.category||'general'));const title=element('span',ad.title?.trim()||'إعلان العائلة','announcement-title');card.append(title);card.setAttribute('aria-label','تفاصيل الإعلان: '+title.textContent);box.append(card)}
+ for(const ad of active){const card=button('',()=>showAdDetails(ad),'announcement-banner ad-'+(ad.category||'general'));const title=element('span',ad.title?.trim()||'إعلان العائلة','announcement-title');card.append(icon(({wedding:'heart',death:'archive',commercial:'storage',urgent:'info',donation:'heart'})[ad.category]||'bell'),title);card.title=title.textContent;card.setAttribute('aria-label','تفاصيل الإعلان: '+title.textContent);box.append(card)}
+ fitAnnouncements(box);
  clearTimeout(adExpiryTimer);
  const next=state.ads.flatMap(ad=>[Date.parse(ad.starts_at),Date.parse(ad.ends_at)]).filter(t=>t>now).sort((a,b)=>a-b)[0];
  if(next)adExpiryTimer=setTimeout(paintAnnouncements,Math.min(next-now+20,2147483647));

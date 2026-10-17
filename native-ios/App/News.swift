@@ -74,16 +74,21 @@ struct AnnouncementTabs:View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var glow=false
     func color(_ ad:Item)->Color {switch ad.text("category"){case "death":return .gray;case "urgent":return Color(red:0.72,green:0.22,blue:0.25);case "wedding":return Color(red:0.48,green:0.29,blue:0.64);case "donation":return brandPink;default:return brandBlue}}
+    func symbol(_ ad:Item)->String{switch ad.text("category"){case "wedding":return "heart.fill";case "death":return "leaf.fill";case "commercial":return "bag.fill";case "urgent":return "exclamationmark.circle.fill";case "donation":return "heart.circle.fill";default:return "megaphone.fill"}}
     var body:some View {
-        ScrollView(.horizontal){HStack(spacing:8){ForEach(ads){ad in
-            let tone=color(ad)
-            Button{open(ad)}label:{
-                HStack(spacing:8){Image(systemName:ad.text("category")=="death" ? "leaf.fill":"megaphone.fill").font(.system(size:15));Text(ad.text("title").isEmpty ? "إعلان العائلة":ad.text("title")).font(.system(size:14,weight:.semibold)).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)}
-                    .foregroundStyle(tone).frame(width:220,height:46,alignment:.leading).padding(.horizontal,13)
-                    .background(tone.opacity(0.1),in:RoundedRectangle(cornerRadius:12))
-                    .overlay{RoundedRectangle(cornerRadius:12).stroke(tone.opacity(glow && ["urgent","donation"].contains(ad.text("category")) && !reduceMotion ? 0.65:0.25),lineWidth:1)}
-            }.buttonStyle(.plain).accessibilityLabel(ad.text("title")).accessibilityHint("عرض تفاصيل الإعلان")
-        }}.padding(.horizontal,10).padding(.vertical,8)}.frame(height:64).scrollIndicators(.hidden).background(Color(.systemBackground)).overlay(alignment:.bottom){Divider()}.onAppear{if !reduceMotion{withAnimation(.easeInOut(duration:1.4).repeatForever(autoreverses:true)){glow=true}}}
+        GeometryReader{geometry in
+            let fit=announcementFit(width:Double(geometry.size.width),count:ads.count)
+            HStack(spacing:CGFloat(fit.gap)){ForEach(ads){ad in
+                let tone=color(ad)
+                Button{open(ad)}label:{
+                    HStack(spacing:fit.iconsOnly ? 0:4){Image(systemName:symbol(ad)).font(.system(size:CGFloat(fit.icon))).frame(width:CGFloat(fit.icon));if !fit.iconsOnly{Text(ad.text("title").isEmpty ? "إعلان العائلة":ad.text("title")).font(.system(size:CGFloat(max(10,min(14,fit.cell/9))),weight:.semibold)).lineLimit(2).minimumScaleFactor(0.8).multilineTextAlignment(.leading).frame(maxWidth:.infinity,alignment:.leading)}}
+                        .padding(.horizontal,fit.iconsOnly ? 0:5).frame(width:CGFloat(fit.cell),height:46)
+                        .foregroundStyle(tone).background(tone.opacity(0.1),in:RoundedRectangle(cornerRadius:10))
+                        .overlay{RoundedRectangle(cornerRadius:10).stroke(tone.opacity(glow && ["urgent","donation"].contains(ad.text("category")) && !reduceMotion ? 0.65:0.25),lineWidth:1)}
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel(ad.text("title")).accessibilityHint("عرض تفاصيل الإعلان")
+            }}.padding(.horizontal,10).padding(.vertical,9)
+        }.frame(height:64).background(Color(.systemBackground)).overlay(alignment:.bottom){Divider()}.onAppear{if !reduceMotion{withAnimation(.easeInOut(duration:1.4).repeatForever(autoreverses:true)){glow=true}}}
     }
 }
 struct NewsAlbum:View {

@@ -110,6 +110,11 @@ func mentionToken(_ text:String,caret:Int)->MentionToken? {
     guard let expression=try? NSRegularExpression(pattern:"(?:^|[\\s(])(@[^\\s@]*)$"),let match=expression.firstMatch(in:prefix as String,range:NSRange(location:0,length:prefix.length)) else{return nil}
     let range=match.range(at:1);let token=prefix.substring(with:range);return MentionToken(term:String(token.dropFirst()),range:range)
 }
+struct AnnouncementFit {let gap:Double;let cell:Double;let icon:Double;var iconsOnly:Bool{cell<68}}
+func announcementFit(width:Double,count:Int)->AnnouncementFit {
+    let n=Double(max(1,count));let available=max(0,width-20);let gap=min(8,available/(n*10));let cell=max(0,(available-gap*(n-1))/n)
+    return AnnouncementFit(gap:gap,cell:cell,icon:max(2,min(18,cell*0.5)))
+}
 func q(_ key:String,_ value:String)->URLQueryItem {URLQueryItem(name:key,value:value)}
 func phone(_ input:String)throws->String {
     let normalized=String(input.map {c -> Character in
