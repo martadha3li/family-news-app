@@ -4,7 +4,8 @@ import UIKit
 
 @main struct FamilyNewsApp: App {
     @StateObject private var api=Backend()
-    var body:some Scene {WindowGroup {RootScreen().environmentObject(api).environment(\.layoutDirection,.rightToLeft).environment(\.locale,Locale(identifier:"ar_SA")).tint(brandBlue)}}
+    @StateObject private var alerts=NativeNotifications()
+    var body:some Scene {WindowGroup {RootScreen().environmentObject(api).environmentObject(alerts).environment(\.layoutDirection,.rightToLeft).environment(\.locale,Locale(identifier:"ar_SA")).tint(brandBlue)}}
 }
 struct TaskButton:View {
     let title:String
@@ -31,8 +32,12 @@ struct PrivateImage:View {
 struct Avatar:View {let path:String;let name:String;var size:CGFloat=42;var body:some View{Group{if path.isEmpty{ZStack{brandBlue.opacity(0.1);Text(String(name.prefix(1))).font(.system(size:size*0.4,weight:.semibold)).foregroundStyle(brandBlue)}}else{PrivateImage(path:path)}}.frame(width:size,height:size).clipShape(Circle()).accessibilityHidden(true)}}
 struct RootScreen:View {
     @EnvironmentObject private var api:Backend
+    @EnvironmentObject private var alerts:NativeNotifications
     @Environment(\.scenePhase) private var phase
-    var body:some View{Group{if api.restoring{ProgressView("جاري فتح أخبار العائلة…")}else if !api.signedIn{LoginScreen()}else{HomeScreen()}}.task{await api.restore()}.onChange(of:phase){_,value in if value == .active,api.signedIn{Task{do{try await api.loadAccount()}catch{api.warning=api.errorText(error)}}}}}
+    var body:some View{Group{if api.restoring{ProgressView("جاري فتح أخبار العائلة…")}else if !api.signedIn{LoginScreen()}else{HomeScreen()}}.task{await api.restore()}.task(id:String(api.active)+String(describing:phase)){
+        guard api.active,phase == .active else{return};await alerts.updatePermission()
+        while !Task.isCancelled && api.active && phase == .active{await alerts.refresh(api);do{try await Task.sleep(nanoseconds:15_000_000_000)}catch{break}}
+    }.onChange(of:api.signedIn){_,value in if !value{alerts.reset()}}.onChange(of:api.active){_,value in if !value{alerts.reset()}}.onChange(of:phase){_,value in if value == .active,api.signedIn{Task{do{try await api.loadAccount()}catch{api.warning=api.errorText(error)}}}}}
 }
 struct LoginScreen:View {
     @EnvironmentObject private var api:Backend
@@ -61,9 +66,10 @@ struct HomeScreen:View {
     @EnvironmentObject private var api:Backend
     @State private var selection=0
     @State private var chats=false
+    @State private var notifications=false
     var body:some View{TabView(selection:$selection){NavigationStack{if api.active{NewsScreen()}else{VStack(spacing:20){Image(systemName:"person.badge.clock").font(.largeTitle);Text(api.profile.text("status")=="suspended" ? "الحساب موقوف مؤقتًا":"حسابك بانتظار الاعتماد").font(.title3);TaskButton(title:"تحديث حالة الحساب",symbol:"arrow.clockwise"){try await api.loadAccount()};NavigationLink("إكمال ملفي"){ProfileScreen()}}.padding()}}.tabItem{Label("الأخبار",systemImage:"house")}.tag(0)
         if api.active{Color.clear.tabItem{Label("الدردشات",systemImage:"bubble.left.and.bubble.right")}.tag(1)}
         NavigationStack{ProfileScreen()}.tabItem{Label("حسابي",systemImage:"person.crop.circle")}.tag(2)
         NavigationStack{MoreScreen()}.tabItem{Label("المزيد",systemImage:"line.3.horizontal")}.tag(3)
-    }.onChange(of:selection){_,value in if value==1{selection=0;chats=true}}.fullScreenCover(isPresented:$chats){NavigationStack{ChatsScreen()}.environmentObject(api)} }
+    }.onReceive(NotificationCenter.default.publisher(for:.openFamilyNotifications)){_ in if api.active{chats=false;notifications=true}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.onChange(of:selection){_,value in if value==1{selection=0;chats=true}}.fullScreenCover(isPresented:$chats){NavigationStack{ChatsScreen()}.environmentObject(api)} }
 }

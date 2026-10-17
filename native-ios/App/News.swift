@@ -10,17 +10,18 @@ struct NewsScreen:View {
     @State private var ads:[Item]=[]
     @State private var error=""
     @State private var now=Date()
+    @State private var notifications=false
     @State private var loading=false
     @State private var more=true
     @State private var editor:Item?
     @State private var details:Item?
-    var body:some View{ScrollView{LazyVStack(spacing:18){if scope == .published{ForEach(activeAds){ad in Button{details=ad}label:{HStack{Image(systemName:ad.text("category")=="death" ? "leaf":"megaphone");Text(ad.text("title")).font(.subheadline.bold());Spacer();Image(systemName:"chevron.left").font(.caption)}.foregroundStyle(adColor(ad)).padding(14).background(adColor(ad).opacity(0.08),in:RoundedRectangle(cornerRadius:14))}.padding(.horizontal)}}
+    var body:some View{ScrollView{LazyVStack(spacing:18){
         LoadError(text:error)
         if posts.isEmpty && !loading{EmptyState(title:"لا توجد أخبار هنا بعد",symbol:"newspaper")}
         ForEach(posts){p in NativePost(post:p,edit:{editor=p},refresh:{await load(reset:true)},scope:scope)}
         if loading{ProgressView().padding()}
         if more && !posts.isEmpty{TaskButton(title:"عرض أخبار أقدم",symbol:"arrow.down"){await load(reset:false)}}
-    }.padding(.vertical,12).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}}.task{await load(reset:true);while !Task.isCancelled{do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{break};now=Date()}}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{ScrollView{VStack(alignment:.leading,spacing:20){Text(ad.text("title")).font(.title2.bold());Text(ad.text("body"));Text("حتى \(dateValue(ad.text("ends_at")).formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)}.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){details=nil}}}}}}
+    }.padding(.vertical,12).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).safeAreaInset(edge:.top,spacing:0){if scope == .published && !activeAds.isEmpty{AnnouncementTabs(ads:activeAds,open:{details=$0})}}.background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()};ToolbarItem(placement:.navigationBarLeading){NotificationBell{notifications=true}}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}}.task{await load(reset:true);while !Task.isCancelled{do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{break};now=Date()}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{ScrollView{VStack(alignment:.leading,spacing:20){Text(ad.text("title")).font(.title2.bold());Text(ad.text("body"));Text("حتى \(dateValue(ad.text("ends_at")).formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)}.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){details=nil}}}}}}
     var activeAds:[Item]{ads.filter{$0.flag("enabled") && dateValue($0.text("starts_at"))<=now && dateValue($0.text("ends_at"))>now}}
     func adColor(_ ad:Item)->Color{switch ad.text("category"){case "death":return .gray;case "urgent":return .red;case "wedding","donation":return brandPink;default:return brandBlue}}
     func load(reset:Bool)async{if loading{return};loading=true;defer{loading=false};do{var query=[q("select","*,profiles:profiles!posts_author_id_fkey(display_name,avatar_path),likes(count),comments(count)"),q("order","created_at.desc,id.desc"),q("limit","20"),q("offset",reset ? "0":String(posts.count))];switch scope{case .published:query += [q("published","eq.true"),q("deleted_at","is.null")];case .drafts:query += [q("published","eq.false"),q("author_id","eq."+api.user.id),q("deleted_at","is.null")];case .review:query += [q("moderation_status","eq.pending"),q("deleted_at","is.null")];case .hidden:query += [q("deleted_at","not.is.null")];case .mentioned:query += [q("mentioned_member_ids","cs.{"+api.user.id+"}"),q("published","eq.true"),q("deleted_at","is.null")]} ;let rows=try await api.table("posts",query);if reset{posts=rows}else{posts += rows};more=rows.count==20;error="";if scope == .published{ads=try await api.table("announcements",[q("select","*"),q("enabled","eq.true"),q("limit","200"),q("order","starts_at.desc")])}}catch{self.error=api.errorText(error)}}
@@ -38,11 +39,11 @@ struct NativePost:View {
     @State private var issue=""
     var editable:Bool{api.admin || (api.writer && post.text("author_id")==api.user.id)}
     var body:some View{VStack(alignment:.leading,spacing:0){HStack(spacing:10){Avatar(path:post.child("profiles").text("avatar_path"),name:post.child("profiles").text("display_name"));VStack(alignment:.leading,spacing:3){Text(post.child("profiles").text("display_name")).font(.subheadline.weight(.semibold));Text(dateValue(post.text("created_at")),style:.date).font(.caption2).foregroundStyle(.secondary)};Spacer();if editable{Menu{Button("تعديل الخبر",systemImage:"pencil"){edit()};Button(scope == .hidden ? "استعادة الخبر":"إخفاء الخبر",systemImage:scope == .hidden ? "arrow.uturn.backward":"eye.slash"){Task{do{_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["deleted_at":scope == .hidden ? NSNull():ISO8601DateFormatter().string(from:Date())]);await refresh()}catch{issue=api.errorText(error)}}};if api.admin{Button("حذف نهائي",systemImage:"trash",role:.destructive){confirmDelete=true}}}label:{Image(systemName:"ellipsis").frame(width:44,height:44)}}}.padding(.horizontal,14).padding(.vertical,10)
-        if !post.text("image_path").isEmpty{PrivateImage(path:post.text("image_path"),bucket:"news-images",fill:false).aspectRatio(4/5,contentMode:.fit)}
+        if !post.imagePaths.isEmpty{NewsAlbum(paths:post.imagePaths)}
         HStack(spacing:20){TaskButton(title:String(count),symbol:liked ? "heart.fill":"heart"){if liked{_ = try await api.table("likes",[q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)],method:"DELETE")}else{_ = try await api.table("likes",method:"POST",body:["post_id":post.id,"user_id":api.user.id])};liked.toggle();count += liked ? 1 : -1}.foregroundStyle(liked ? brandPink:Color.primary).accessibilityLabel(liked ? "إلغاء الإعجاب":"إعجاب");Button{comments=true}label:{Label(String(post.rows("comments").first?.number("count") ?? 0),systemImage:"bubble.right")}.accessibilityLabel("تعليقات الخبر");Spacer()}.font(.title3).buttonStyle(.plain).padding(.horizontal,16).padding(.vertical,7)
         VStack(alignment:.leading,spacing:6){Text(post.text("title")).font(.subheadline.bold());Text(post.text("body")).font(.subheadline).lineSpacing(4).textSelection(.enabled);if !post.flag("published"){Text(post.text("moderation_status")=="pending" ? "بانتظار موافقة المدير":"مسودة").font(.caption).foregroundStyle(brandPink)};if scope == .review && api.admin{HStack{TaskButton(title:"اعتماد ونشر",symbol:"checkmark"){_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["published":true,"moderation_status":"published"]);await refresh()};TaskButton(title:"رفض",symbol:"xmark"){_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["published":false,"moderation_status":"rejected"]);await refresh()}}.buttonStyle(.bordered)}}.padding(.horizontal,16).padding(.bottom,18)
     }.background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius:14)).sheet(isPresented:$comments){NavigationStack{CommentsScreen(post:post)}}.task(id:post.id){count=post.rows("likes").first?.number("count") ?? 0;do{liked = !(try await api.table("likes",[q("select","user_id"),q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)])).isEmpty}catch{}}
-    .alert("حذف الخبر نهائيًا؟",isPresented:$confirmDelete){Button("إلغاء",role:.cancel){};Button("حذف",role:.destructive){Task{do{let rows=try await api.table("posts",[q("id","eq."+post.id)],method:"DELETE");guard !rows.isEmpty else{throw FamilyError(text:"لم يتم حذف الخبر.")};let path=post.text("image_path");if !path.isEmpty{let shared=try await api.table("posts",[q("select","id"),q("image_path","eq."+path),q("limit","1")]);if shared.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":[path]])}};await refresh()}catch{issue=api.errorText(error)}}}}message:{Text("سيُحذف الخبر وتعليقاته وإعجاباته، ولا يمكن استعادته.")}.alert("تعذّر إكمال الطلب",isPresented:Binding(get:{!issue.isEmpty},set:{if !$0{issue=""}})){Button("حسنًا",role:.cancel){}}message:{Text(issue)}}
+    .alert("حذف الخبر نهائيًا؟",isPresented:$confirmDelete){Button("إلغاء",role:.cancel){};Button("حذف",role:.destructive){Task{do{let rows=try await api.table("posts",[q("id","eq."+post.id)],method:"DELETE");guard !rows.isEmpty else{throw FamilyError(text:"لم يتم حذف الخبر.")};for path in post.imagePaths{let shared=try await api.table("posts",[q("select","id"),q("image_paths","cs.{"+path+"}"),q("limit","1")]);if shared.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":[path]])}};await refresh()}catch{issue=api.errorText(error)}}}}message:{Text("سيُحذف الخبر وتعليقاته وإعجاباته، ولا يمكن استعادته.")}.alert("تعذّر إكمال الطلب",isPresented:Binding(get:{!issue.isEmpty},set:{if !$0{issue=""}})){Button("حسنًا",role:.cancel){}}message:{Text(issue)}}
 }
 struct CommentsScreen:View {
     @EnvironmentObject private var api:Backend
@@ -90,6 +91,35 @@ struct CommentsScreen:View {
         .task {await load()}
     }
 }
+struct AnnouncementTabs:View {
+    let ads:[Item]
+    let open:(Item)->Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var glow=false
+    func color(_ ad:Item)->Color {switch ad.text("category"){case "death":return .gray;case "urgent":return Color(red:0.72,green:0.22,blue:0.25);case "wedding":return Color(red:0.48,green:0.29,blue:0.64);case "donation":return brandPink;default:return brandBlue}}
+    var body:some View {
+        ScrollView(.horizontal){HStack(spacing:8){ForEach(ads){ad in
+            let tone=color(ad)
+            Button{open(ad)}label:{HStack(spacing:6){Image(systemName:ad.text("category")=="death" ? "leaf":"megaphone.fill");Text(ad.text("title")).font(.subheadline.weight(.semibold)).lineLimit(2)}.frame(minHeight:30).padding(.horizontal,14).padding(.vertical,8).foregroundStyle(tone).background(tone.opacity(0.1),in:RoundedRectangle(cornerRadius:12)).overlay{RoundedRectangle(cornerRadius:12).stroke(tone.opacity(glow && ["urgent","donation"].contains(ad.text("category")) && !reduceMotion ? 0.65:0.18),lineWidth:1.5)}}.buttonStyle(.plain).accessibilityHint("عرض تفاصيل الإعلان")
+        }}.padding(.horizontal,12).padding(.vertical,8)}.scrollIndicators(.hidden).background(.bar).onAppear{withAnimation(.easeInOut(duration:1.2).repeatForever(autoreverses:true)){glow=true}}
+    }
+}
+struct NewsAlbum:View {
+    let paths:[String]
+    @State private var page=0
+    var body:some View {
+        VStack(spacing:8){
+            GeometryReader{geometry in
+                TabView(selection:$page){ForEach(Array(paths.enumerated()),id:\.offset){index,path in
+                    PrivateImage(path:path,bucket:"news-images",fill:false).frame(width:geometry.size.width,height:geometry.size.height).tag(index)
+                }}.tabViewStyle(.page(indexDisplayMode:.never))
+                .overlay(alignment:.topTrailing){if paths.count>1{Text("\(page+1) / \(paths.count)").font(.caption.monospacedDigit()).padding(.horizontal,10).padding(.vertical,5).foregroundStyle(.white).background(.black.opacity(0.55),in:Capsule()).padding(12)}}
+            }.aspectRatio(4.0/5.0,contentMode:.fit)
+            if paths.count>1{HStack(spacing:5){ForEach(paths.indices,id:\.self){index in Button{withAnimation{page=index}}label:{Circle().fill(index==page ? brandBlue:Color.secondary.opacity(0.25)).frame(width:6,height:6).padding(5)}.accessibilityLabel("الصورة \(index+1)")}}}
+        }.accessibilityElement(children:.contain).accessibilityLabel("صور الخبر").onChange(of:paths){_,_ in page=min(page,max(0,paths.count-1))}
+    }
+}
+struct EditorPhoto:Identifiable {let id=UUID();var path:String?;var data:Data?}
 struct PostEditor:View {
     @EnvironmentObject private var api:Backend
     @Environment(\.dismiss) private var dismiss
@@ -98,12 +128,53 @@ struct PostEditor:View {
     @State private var title:String
     @State private var bodyText:String
     @State private var publish:Bool
-    @State private var photo:PhotosPickerItem?
-    @State private var imageData:Data?
+    @State private var photos:[PhotosPickerItem]=[]
+    @State private var album:[EditorPhoto]
+    @State private var loadingPhotos=false
+    @State private var saving=false
     @State private var search=""
     @State private var people:[Item]=[]
     @State private var selected:[Item]=[]
     @State private var imageError=""
-    init(post:Item?,saved:@escaping ()async->Void){self.post=post;self.saved=saved;_title=State(initialValue:post?.text("title") ?? "");_bodyText=State(initialValue:post?.text("body") ?? "");_publish=State(initialValue:post?.flag("published") ?? true)}
-    var body:some View{Form{Section("الخبر"){TextField("عنوان الخبر",text:$title);TextField("التفاصيل",text:$bodyText,axis:.vertical).lineLimit(5...15);Toggle("نشر الخبر الآن",isOn:$publish)};Section("الصورة"){PhotosPicker(selection:$photo,matching:.images){Label("اختيار صورة",systemImage:"photo")}.disabled(post != nil && post?.text("author_id") != api.user.id);if let data=imageData,let img=UIImage(data:data){Image(uiImage:img).resizable().scaledToFit().frame(maxHeight:240)};LoadError(text:imageError);Text("تُضغط الصورة قبل الرفع وتُعرض بإطار 4:5.").font(.caption).foregroundStyle(.secondary)};Section("منشن لأعضاء العائلة"){TextField("ابحث بالاسم",text:$search).task(id:search){do{try await Task.sleep(nanoseconds:250_000_000);try Task.checkCancellation();guard search.count>=2 else{people=[];return};let r=try await api.table("profiles",[q("select","id,display_name"),q("status","eq.active"),q("display_name","ilike.*"+search.replacingOccurrences(of:"*",with:"")+"*"),q("limit","20")]);try Task.checkCancellation();people=r}catch{}};ForEach(people){p in Button{if selected.count<20 && !selected.contains(where:{$0.id==p.id}){selected.append(p)}}label:{Label(p.text("display_name"),systemImage:selected.contains(where:{$0.id==p.id}) ? "checkmark.circle.fill":"at")}};ForEach(selected){p in Button(role:.destructive){selected.removeAll{$0.id==p.id}}label:{Label(p.text("display_name"),systemImage:"minus.circle")}}};Section{TaskButton(title:"حفظ الخبر",symbol:"checkmark"){guard api.writer,title.trimmingCharacters(in:.whitespaces).count>=3,title.count<=250,!bodyText.trimmingCharacters(in:.whitespaces).isEmpty,bodyText.count<=20000 else{throw FamilyError(text:"أدخل عنوانًا صالحًا وتفاصيل الخبر.")};var values:[String:Any]=["title":title,"body":bodyText,"published":publish,"mentioned_member_ids":selected.map(\.id)];var uploaded:String?;do{if let data=imageData{uploaded=try await api.upload(data,bucket:"news-images");values["image_path"]=uploaded};if let p=post{_ = try await api.table("posts",[q("id","eq."+p.id)],method:"PATCH",body:values)}else{values["author_id"]=api.user.id;_ = try await api.table("posts",method:"POST",body:values)}}catch{if let path=uploaded{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":[path]])};throw error};await saved();dismiss()}.disabled(!api.writer)}}.scrollIndicators(.hidden).scrollDismissesKeyboard(.interactively).navigationTitle(post==nil ? "خبر جديد":"تعديل الخبر").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onChange(of:photo){_,item in Task{do{guard let data=try await item?.loadTransferable(type:Data.self),data.count<=20*1024*1024,UIImage(data:data) != nil else{throw FamilyError(text:"اختر صورة صالحة أقل من 20 ميجابايت.")};imageData=data;imageError=""}catch{imageError=api.errorText(error)}}}.task{if let ids=post?.raw["mentioned_member_ids"] as? [String],!ids.isEmpty{selected=(try? await api.table("profiles",[q("select","id,display_name"),q("id","in.("+ids.joined(separator:",")+")")])) ?? []}}}
+    var canChangePhotos:Bool{post == nil || post?.text("author_id")==api.user.id}
+    init(post:Item?,saved:@escaping ()async->Void){self.post=post;self.saved=saved;_title=State(initialValue:post?.text("title") ?? "");_bodyText=State(initialValue:post?.text("body") ?? "");_publish=State(initialValue:post?.flag("published") ?? true);_album=State(initialValue:(post?.imagePaths ?? []).map{EditorPhoto(path:$0)})}
+    var body:some View {
+        Form {
+            Section("الخبر"){TextField("عنوان الخبر",text:$title);TextField("التفاصيل",text:$bodyText,axis:.vertical).lineLimit(5...15);Toggle("نشر الخبر الآن",isOn:$publish)}
+            Section("صور الخبر · \(album.count) / ٥"){
+                ForEach(Array(album.enumerated()),id:\.element.id){index,photo in
+                    VStack{Group{if let data=photo.data,let image=UIImage(data:data){Image(uiImage:image).resizable().scaledToFit()}else if let path=photo.path{PrivateImage(path:path,bucket:"news-images",fill:false)}}.frame(height:160)
+                        if canChangePhotos{HStack{Text("الصورة \(index+1)");Spacer();Button{album.swapAt(index,index-1)}label:{Image(systemName:"arrow.up")}.disabled(index==0).accessibilityLabel("تقديم الصورة");Button{album.swapAt(index,index+1)}label:{Image(systemName:"arrow.down")}.disabled(index==album.count-1).accessibilityLabel("تأخير الصورة");Button(role:.destructive){album.removeAll{$0.id==photo.id}}label:{Image(systemName:"trash")}.accessibilityLabel("إزالة الصورة")}.buttonStyle(.borderless)}
+                    }
+                }
+                if album.count<5 && canChangePhotos{PhotosPicker(selection:$photos,maxSelectionCount:5-album.count,selectionBehavior:.ordered,matching:.images){Label("إضافة صور",systemImage:"photo.on.rectangle.angled")}.disabled(loadingPhotos)}
+                if loadingPhotos{ProgressView("تجهيز الصور…")}
+                LoadError(text:imageError)
+                Text("حتى ٥ صور. إطار موحّد 4:5 بدقة تصل إلى 1080 × 1350، مع ضغط الصور والسحب بينها.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("منشن لأعضاء العائلة"){
+                TextField("ابحث بالاسم",text:$search).task(id:search){do{try await Task.sleep(nanoseconds:250_000_000);try Task.checkCancellation();guard search.count>=2 else{people=[];return};let r=try await api.table("profiles",[q("select","id,display_name"),q("status","eq.active"),q("display_name","ilike.*"+search.replacingOccurrences(of:"*",with:"")+"*"),q("limit","20")]);try Task.checkCancellation();people=r}catch{}}
+                ForEach(people){p in Button{if selected.count<20 && !selected.contains(where:{$0.id==p.id}){selected.append(p)}}label:{Label(p.text("display_name"),systemImage:selected.contains(where:{$0.id==p.id}) ? "checkmark.circle.fill":"at")}}
+                ForEach(selected){p in Button(role:.destructive){selected.removeAll{$0.id==p.id}}label:{Label(p.text("display_name"),systemImage:"minus.circle")}}
+            }
+            Section{TaskButton(title:"حفظ الخبر",symbol:"checkmark"){try await save()}.disabled(!api.writer || loadingPhotos || saving)}
+        }.disabled(saving).scrollIndicators(.hidden).scrollDismissesKeyboard(.interactively).navigationTitle(post==nil ? "خبر جديد":"تعديل الخبر").navigationBarTitleDisplayMode(.inline)
+        .toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}.disabled(saving)}}.interactiveDismissDisabled(saving || loadingPhotos)
+        .onChange(of:photos){_,items in
+            guard !items.isEmpty else{return};loadingPhotos=true
+            Task{defer{loadingPhotos=false;photos=[]};do{var additions:[EditorPhoto]=[];for item in items.prefix(5-album.count){guard let data=try await item.loadTransferable(type:Data.self),data.count<=20*1024*1024,UIImage(data:data) != nil else{throw FamilyError(text:"اختر صورًا صالحة أقل من 20 ميجابايت لكل صورة.")};additions.append(EditorPhoto(data:data))};album += additions;imageError=""}catch{imageError=api.errorText(error)}}
+        }.task{if let ids=post?.raw["mentioned_member_ids"] as? [String],!ids.isEmpty{selected=(try? await api.table("profiles",[q("select","id,display_name"),q("id","in.("+ids.joined(separator:",")+")")])) ?? []}}
+    }
+    func save()async throws {
+        guard api.writer,title.trimmingCharacters(in:.whitespaces).count>=3,title.count<=250,!bodyText.trimmingCharacters(in:.whitespaces).isEmpty,bodyText.count<=20000,album.count<=5 else{throw FamilyError(text:"أدخل عنوانًا صالحًا وتفاصيل الخبر، وبحد أقصى ٥ صور.")}
+        saving=true;defer{saving=false};var uploaded:[String]=[];var paths:[String]=[]
+        do{
+            for photo in album{if let path=photo.path{paths.append(path)}else if let data=photo.data{let path=try await api.upload(data,bucket:"news-images");uploaded.append(path);paths.append(path)}}
+            var values:[String:Any]=["title":title,"body":bodyText,"published":publish,"mentioned_member_ids":selected.map(\.id),"image_paths":paths,"image_path":paths.first.map{$0 as Any} ?? NSNull()]
+            let rows:[Item];if let post=post{rows=try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:values)}else{values["author_id"]=api.user.id;rows=try await api.table("posts",method:"POST",body:values)}
+            guard !rows.isEmpty else{throw FamilyError(text:"لم يتم حفظ الخبر. حدّث صلاحيات الحساب وأعد المحاولة.")}
+        }catch{if !uploaded.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":uploaded])};throw error}
+        for path in post?.imagePaths ?? [] where !paths.contains(path){if let shared=try? await api.table("posts",[q("select","id"),q("image_paths","cs.{"+path+"}"),q("limit","1")]),shared.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":[path]])}}
+        await saved();dismiss()
+    }
 }

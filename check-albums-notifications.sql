@@ -1,0 +1,62 @@
+begin;
+create temp table album_fixture(label text,id uuid);insert into album_fixture values('author',gen_random_uuid()),('member',gen_random_uuid()),('female',gen_random_uuid()),('pending',gen_random_uuid());grant select on album_fixture to authenticated;
+insert into public.allowed_families(name) values('اختبارألبوم');
+insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) select id,id::text||'@example.invalid',now(),jsonb_build_object('full_name',label||' علي حسن اختبارألبوم','phone',case label when 'author' then '+966500008801' when 'member' then '+966500008802' when 'female' then '+966500008803' else '+966500008804' end,'gender',case when label='female' then 'female' else 'male' end,'reference_name','author علي حسن اختبارألبوم','relationship','father') from album_fixture;
+update public.profiles set status=case when id=(select id from album_fixture where label='pending') then 'pending' else 'active' end where id in(select id from album_fixture);
+update public.profiles set role='journalist' where id=(select id from album_fixture where label='author');
+update public.family_settings set journalist_approval=false,chat_enabled=true,private_chat_enabled=true,restrict_gender_chat=true;
+create temp table album_posts(id bigint);grant select,insert on album_posts to authenticated;
+select set_config('request.jwt.claim.sub',(select id::text from album_fixture where label='author'),true);
+set local role authenticated;
+with p as(insert into public.posts(author_id,title,body,published,image_paths) values(auth.uid(),'فحص ألبوم مؤقت','فحص لا يبقى بعد التراجع',true,array[auth.uid()||'/1.jpg',auth.uid()||'/2.jpg',auth.uid()||'/3.jpg',auth.uid()||'/4.jpg',auth.uid()||'/5.jpg']) returning id) insert into album_posts select id from p;
+do $$declare paths text[];begin
+ select image_paths into paths from public.posts where id=(select id from album_posts);
+ if cardinality(paths)<>5 or (select image_path<>paths[1] from public.posts where id=(select id from album_posts)) then raise exception 'Album not saved';end if;
+ begin update public.posts set image_paths=paths||array[auth.uid()||'/6.jpg'] where id=(select id from album_posts);raise exception 'SIX_ACCEPTED';exception when raise_exception then if sqlerrm='SIX_ACCEPTED' then raise;end if;end;
+ begin update public.posts set image_paths=array[(select id::text from album_fixture where label='member')||'/wrong.jpg'] where id=(select id from album_posts);raise exception 'OTHER_OWNER_ACCEPTED';exception when raise_exception then if sqlerrm='OTHER_OWNER_ACCEPTED' then raise;end if;end;
+ update public.posts set image_path=auth.uid()||'/cover.jpg' where id=(select id from album_posts);
+ if (select cardinality(image_paths)<>5 or image_paths[2]<>auth.uid()||'/2.jpg' from public.posts where id=(select id from album_posts)) then raise exception 'Old-client edit lost album';end if;
+end$$;
+reset role;
+-- Simulate metadata only, with no upload or network request.
+insert into storage.objects(bucket_id,name) select 'news-images',unnest(image_paths) from public.posts where id=(select id from album_posts);
+select set_config('request.jwt.claim.sub',(select id::text from album_fixture where label='member'),true);
+set local role authenticated;
+do $$declare result jsonb;t uuid;begin
+ if (select count(*) from storage.objects where bucket_id='news-images' and name like (select id::text from album_fixture where label='author')||'/%')<>5 then raise exception 'Album images not readable';end if;
+ result=public.native_notifications('list');if not exists(select 1 from jsonb_array_elements(result->'items') x where x->>'post_id'=(select id::text from album_posts)) then raise exception 'Published news missing';end if;
+ if result::text like '%فحص لا يبقى%' then raise exception 'Body leaked into notification';end if;
+ t=public.chat_open((select id from album_fixture where label='author'));perform public.chat_send(t,'فحص رسالة مؤقتة');
+end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from album_fixture where label='author'),true);
+set local role authenticated;
+do $$declare result jsonb;begin
+ result=public.native_notifications('list');if not exists(select 1 from jsonb_array_elements(result->'items') x where x->>'kind'='private' and x->>'member_id'=(select id::text from album_fixture where label='member')) then raise exception 'Private notification missing';end if;
+ if result::text like '%فحص رسالة مؤقتة%' then raise exception 'Message body leaked';end if;
+ result=public.native_notifications('read',jsonb_build_object('through',result->>'server_at'));if (result->>'read_at')::timestamptz>clock_timestamp() then raise exception 'Invalid watermark';end if;
+ update public.posts set deleted_at=now() where id=(select id from album_posts);
+end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from album_fixture where label='female'),true);
+set local role authenticated;
+do $$declare result jsonb;begin
+ result=public.native_notifications('list');if exists(select 1 from jsonb_array_elements(result->'items') x where x->>'kind'='private' or x->>'post_id'=(select id::text from album_posts)) then raise exception 'Private or hidden notification leaked';end if;
+ if exists(select 1 from storage.objects where bucket_id='news-images' and name like (select id::text from album_fixture where label='author')||'/%') then raise exception 'Hidden album leaked';end if;
+end$$;
+reset role;
+update public.family_settings set chat_enabled=false;
+select set_config('request.jwt.claim.sub',(select id::text from album_fixture where label='author'),true);
+set local role authenticated;
+do $$declare result jsonb;begin result=public.native_notifications('list');if exists(select 1 from jsonb_array_elements(result->'items') x where x->>'kind'='private') then raise exception 'Disabled chat leaked';end if;end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from album_fixture where label='pending'),true);
+set local role authenticated;
+do $$begin begin perform public.native_notifications('list');raise exception 'PENDING_ACCEPTED';exception when raise_exception then if sqlerrm='PENDING_ACCEPTED' then raise;end if;end;end$$;
+reset role;
+select set_config('request.jwt.claim.sub','',true);
+set local role anon;
+do $$begin begin perform public.native_notifications('list');raise exception 'ANON_ACCEPTED';exception when insufficient_privilege then null;end;end$$;
+reset role;
+select 'PASS: five-photo album, six rejected, owner isolation, legacy cover compatibility, private storage, news/private inbox, hidden/gender/disabled/pending/anonymous isolation, watermark' as result;
+rollback;

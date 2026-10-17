@@ -12,6 +12,10 @@ struct Item: Identifiable {
     func number(_ key: String) -> Int { (raw[key] as? NSNumber)?.intValue ?? 0 }
     func child(_ key: String) -> Item { Item(raw[key] as? [String: Any] ?? [:]) }
     func rows(_ key: String) -> [Item] { Self.items(raw[key]) }
+    var imagePaths:[String] {
+        let paths=raw["image_paths"] as? [String] ?? []
+        return Array((paths.isEmpty ? (text("image_path").isEmpty ? []:[text("image_path")]):paths).prefix(5))
+    }
     static func items(_ value: Any?) -> [Item] { (value as? [[String: Any]] ?? []).map(Item.init) }
 }
 struct FamilyError: LocalizedError { let text: String; var errorDescription: String? { text } }
