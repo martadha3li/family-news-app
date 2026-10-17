@@ -1,0 +1,34 @@
+name: Build native SwiftUI iOS
+on:
+  push:
+    branches: [main]
+    paths: ['native-ios/**', '.github/workflows/native-ios.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: family-native-ios
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native device archive
+        run: |
+          set -o pipefail
+          xcodebuild -project native-ios/FamilyNews.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath native-build/FamilyNews.xcarchive CODE_SIGNING_ALLOWED=NO archive 2>&1 | tee native-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: family-news-native-build-log
+          path: native-build.log
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: family-news-native-ios
+          path: |
+            native-ios
+            native-build/FamilyNews.xcarchive
+          retention-days: 7
