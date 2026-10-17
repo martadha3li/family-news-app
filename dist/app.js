@@ -99,13 +99,22 @@ function paintAnnouncements(){
 }
 async function loadActiveAnnouncements(){
  if(!state.user||state.profile?.status!=='active')return;
- state.ads=await table('announcements','select=id,title,body,category,starts_at,ends_at,enabled&enabled=eq.true&order=starts_at.desc&limit=200');
+ state.ads=await table('announcements','select=id,title,body,category,contact_member_id,starts_at,ends_at,enabled&enabled=eq.true&order=starts_at.desc&limit=200');
  paintAnnouncements();
 }
-function showAdDetails(ad){const d=element('dialog',undefined,'ad-detail ad-'+(ad.category||'general'));d.append(element('h2',ad.title),element('p',ad.body),element('small','حتى '+new Date(ad.ends_at).toLocaleString('ar-SA')),button('إغلاق',()=>{d.close();d.remove()},'secondary'));document.body.append(d);d.showModal();}
+async function showAdDetails(ad){
+ const d=element('dialog',undefined,'ad-detail ad-'+(ad.category||'general'));d.append(element('h2',ad.title),element('p',ad.body),element('small','حتى '+new Date(ad.ends_at).toLocaleString('ar-SA')));const close=button('إغلاق',()=>{d.close();d.remove()},'secondary');d.append(close);document.body.append(d);d.showModal();
+ if(ad.contact_member_id){try{const p=await req('/rest/v1/rpc/account_action',{method:'POST',body:{action:'directory_profile',payload:{member:ad.contact_member_id}}});if(!d.open)return;if(p.id===state.user.id){d.insertBefore(element('p','أنت المعني بهذا الإعلان.','muted'),close);}else{const contact=button('تواصل مع @'+p.display_name,()=>{document.dispatchEvent(new CustomEvent('family:chat',{detail:{id:p.id,onOpened:()=>{d.close();d.remove();}}}));},'primary ad-contact-chat');contact.setAttribute('aria-label','فتح دردشة خاصة مع '+p.display_name);d.insertBefore(contact,close);}}catch{if(d.open)d.insertBefore(element('p','جهة التواصل لم تعد متاحة.','muted'),close);}}
+}
+
 const categoryLabel=element('label','نوع الإعلان'),categorySelect=element('select');categorySelect.id='ad-category';for(const[v,t]of[['general','عام'],['wedding','زواج'],['death','وفاة'],['commercial','تجاري'],['urgent','عاجل'],['donation','تبرع']]){const o=element('option',t);o.value=v;categorySelect.append(o);}categoryLabel.append(categorySelect);$('ad-title').closest('label').after(categoryLabel);
+let adContactID=null;let contactSearchVersion=0;let contactSearchTimer;
+const contactBox=element('fieldset');contactBox.id='ad-contact-picker';contactBox.append(element('legend','تواصل مع المعني بالإعلان · اختياري'));const contactLabel=element('p','لم تحدد جهة تواصل.','muted');contactLabel.id='ad-contact-selected';const contactSearch=element('input');contactSearch.id='ad-contact-search';contactSearch.placeholder='@ أو بداية اسم العضو';contactSearch.setAttribute('aria-label','بحث عن المعني بالإعلان');const contactResults=element('div');contactResults.id='ad-contact-results';
+function selectAdContact(id,name){adContactID=id;contactLabel.textContent=id?'@'+name:'لم تحدد جهة تواصل.';contactResults.replaceChildren();}
+contactBox.append(contactLabel,contactSearch,contactResults,button('أنا المعني بالإعلان',()=>selectAdContact(state.user.id,state.profile.display_name),'secondary'),button('إزالة جهة التواصل',()=>selectAdContact(null,''),'text-button'));$('ad-body').closest('label').after(contactBox);
+contactSearch.oninput=()=>{clearTimeout(contactSearchTimer);const version=++contactSearchVersion;contactSearchTimer=setTimeout(async()=>{try{const rows=await req('/rest/v1/rpc/mention_search',{method:'POST',body:{term:contactSearch.value.trim().replace(/^@/,'')}});if(version!==contactSearchVersion)return;contactResults.replaceChildren();for(const p of rows)contactResults.append(button('@'+p.display_name,()=>selectAdContact(p.id,p.display_name),'mention-option'));if(!rows.length)contactResults.append(element('small','لا توجد أسماء مطابقة.'));}catch{if(version===contactSearchVersion)contactResults.textContent='تعذّر البحث. حاول مجددًا.';}},180);};
 function resetAdForm(){
- state.adEdit=null;$('announcement-form').reset();
+ state.adEdit=null;$('announcement-form').reset();contactSearchVersion++;clearTimeout(contactSearchTimer);selectAdContact(null,'');
  $('ad-start').value=localInputValue(new Date());$('ad-end').value=localInputValue(Date.now()+86400000);
  $('save-ad').textContent='حفظ الإعلان';$('ad-message').textContent='';$('cancel-ad').hidden=true;
 }
@@ -117,7 +126,7 @@ $('ad-start').onchange=durationChanged;$('ad-duration').oninput=durationChanged;
 $('ad-end').onchange=()=>{const hours=(new Date($('ad-end').value)-new Date($('ad-start').value))/3600000;if(hours>0)$('ad-duration').value=Number(hours.toFixed(2))};
 $('cancel-ad').onclick=resetAdForm;
 function editAnnouncement(ad){
- state.adEdit=ad;$('ad-category').value=ad.category||'general';$('ad-title').value=ad.title;$('ad-body').value=ad.body;
+ state.adEdit=ad;selectAdContact(ad.contact_member_id||null,'العضو المحدد');if(ad.contact_member_id)table('profiles','select=id,display_name&id=eq.'+ad.contact_member_id).then(rows=>{if(state.adEdit?.id===ad.id&&adContactID===ad.contact_member_id&&rows[0])contactLabel.textContent='@'+rows[0].display_name;}).catch(()=>{});$('ad-category').value=ad.category||'general';$('ad-title').value=ad.title;$('ad-body').value=ad.body;
  $('ad-start').value=localInputValue(ad.starts_at);$('ad-end').value=localInputValue(ad.ends_at);
  $('ad-duration').value=Number(((Date.parse(ad.ends_at)-Date.parse(ad.starts_at))/3600000).toFixed(2));
  $('ad-enabled').checked=ad.enabled;$('save-ad').textContent='حفظ التعديل';$('cancel-ad').hidden=false;$('ad-title').focus();
@@ -138,7 +147,7 @@ $('announcement-form').onsubmit=async e=>{e.preventDefault();await busy($('save-
  const title=$('ad-title').value.trim(),body=$('ad-body').value.trim();
  if(title.length<3||!body)throw new Error('أدخل عنوانًا من 3 أحرف على الأقل ونص الإعلان.');
  const period=announcementPeriod($('ad-start').value,$('ad-end').value);
- const values={title,body,category:$('ad-category').value,...period,enabled:$('ad-enabled').checked};
+ const values={title,body,contact_member_id:adContactID,category:$('ad-category').value,...period,enabled:$('ad-enabled').checked};
  if(state.adEdit)await table('announcements','id=eq.'+state.adEdit.id,{method:'PATCH',body:values});
  else await table('announcements','',{method:'POST',body:{...values,author_id:state.user.id}});
  resetAdForm();await listAnnouncements();await loadActiveAnnouncements();toast('تم حفظ الإعلان وجدولة عرضه.');

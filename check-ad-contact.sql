@@ -1,0 +1,32 @@
+begin;
+create temp table contact_fixture(label text,id uuid);insert into contact_fixture values('male',gen_random_uuid()),('female',gen_random_uuid()),('pending',gen_random_uuid());grant select on contact_fixture to authenticated;
+insert into public.allowed_families(name) values('اختبارتواصل');
+insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) select id,id::text||'@example.invalid',now(),jsonb_build_object('full_name',label||' علي حسن اختبارتواصل','display_name',label||' علي حسن اختبارتواصل','gender',case when label='female' then 'female' else 'male' end,'reference_name','male علي حسن اختبارتواصل','relationship','father','phone',case label when 'male' then '+966500008831' when 'female' then '+966500008832' else '+966500008833' end) from contact_fixture order by case label when 'male' then 1 when 'female' then 2 else 3 end;
+update public.profiles set status=case when id=(select id from contact_fixture where label='pending') then 'pending' else 'active' end where id in(select id from contact_fixture);
+update public.family_settings set chat_enabled=true,private_chat_enabled=true,restrict_gender_chat=true;
+select set_config('request.jwt.claim.sub',(select id::text from public.profiles where is_root),true);
+update family_private.member_details set gender='male' where id=auth.uid();
+create temp table contact_ad(id bigint);grant select,insert on contact_ad to authenticated;
+set local role authenticated;
+with a as(insert into public.announcements(author_id,title,body,starts_at,ends_at,enabled,contact_member_id) values(auth.uid(),'إعلان فحص تواصل','فحص لا يبقى',now()-interval '1 minute',now()+interval '1 day',true,(select id from contact_fixture where label='male')) returning id)insert into contact_ad select id from a;
+do $$declare thread uuid;begin
+ thread=public.chat_open((select contact_member_id from public.announcements where id=(select id from contact_ad)));if thread is null then raise exception 'Chat did not open';end if;
+ begin update public.announcements set contact_member_id=(select id from contact_fixture where label='pending') where id=(select id from contact_ad);raise exception 'PENDING_ACCEPTED';exception when raise_exception then if sqlerrm='PENDING_ACCEPTED' then raise;end if;end;
+ begin perform public.chat_open((select id from contact_fixture where label='female'));raise exception 'GENDER_BYPASS';exception when raise_exception then if sqlerrm='GENDER_BYPASS' then raise;end if;end;
+end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from contact_fixture where label='female'),true);
+set local role authenticated;
+do $$declare changed int;begin
+ if (select contact_member_id from public.announcements where id=(select id from contact_ad))<>(select id from contact_fixture where label='male') then raise exception 'Ad contact not readable';end if;
+ update public.announcements set contact_member_id=auth.uid() where id=(select id from contact_ad);get diagnostics changed=row_count;if changed<>0 then raise exception 'Member changed ad contact';end if;
+ begin perform public.chat_open((select contact_member_id from public.announcements where id=(select id from contact_ad)));raise exception 'CONTACT_GENDER_BYPASS';exception when raise_exception then if sqlerrm='CONTACT_GENDER_BYPASS' then raise;end if;end;
+end$$;
+reset role;
+update public.family_settings set chat_enabled=false;
+select set_config('request.jwt.claim.sub',(select id::text from public.profiles where is_root),true);
+set local role authenticated;
+do $$begin begin perform public.chat_open((select id from contact_fixture where label='male'));raise exception 'CHAT_DISABLED_BYPASS';exception when raise_exception then if sqlerrm='CHAT_DISABLED_BYPASS' then raise;end if;end;end$$;
+reset role;
+select 'PASS: active ad contact saved/read, direct chat opened, pending contact rejected, member edit/gender/disabled chat blocked' as result;
+rollback;

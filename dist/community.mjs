@@ -33,6 +33,11 @@ export function initCommunity(c){const {$,state,table,req,button,element,toast,b
  $('profile-form').onsubmit=e=>{e.preventDefault();busy(e.submitter,async()=>{await rpc('profile_save',{data:registrationData('profile')});profile.close();await start();toast('تم تحديث ملفك.');});};
  let thread=null,peer=null,group=null,cursor=null,searchTimer,searchVersion=0,choosingPrivate=false;
  const social=initSocial(c,{rpc,currentGroup:()=>group?.id,currentPeer:()=>peer,openGroup:async g=>{peer=null;group=g;thread=null;choosingPrivate=false;$('chat-heading').textContent=(g.kind==='event'?'◷ ':'♧ ')+g.title;$('chat-messages').replaceChildren();enterRoom();await loadChat();},clearGroup:async()=>{group=null;thread=null;await loadChat();}});
+ document.addEventListener('family:chat',event=>{
+  const other=event.detail?.id;if(state.profile?.status!=='active'||!/^[0-9a-f-]{36}$/i.test(other||''))return;
+  (async()=>{try{const opened=await rpc('chat_open',{other});const person=await rpc('account_action',{action:'directory_profile',payload:{member:other}});peer=person;group=null;choosingPrivate=false;thread=opened;$('chat-heading').textContent=person.display_name;enterRoom();await showSection('chat');event.detail?.onOpened?.();}catch(e){toast(e.message);}})();
+ });
+
  chatLayout.querySelector('aside').prepend(listTitle);
 
  const keys=['chat_enabled','public_chat_enabled','private_chat_enabled','restrict_gender_chat','journalist_approval','auto_activate','allow_groups','endorsements_enabled'];
