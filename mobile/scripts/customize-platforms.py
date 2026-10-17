@@ -17,11 +17,19 @@ if ios.exists():
  p=ios/'Info.plist'
  settings=plistlib.loads(p.read_bytes())
  settings['CFBundleShortVersionString']='1.2.0'
- settings['CFBundleVersion']='3'
+ settings['CFBundleVersion']='4'
  settings['NSPhotoLibraryUsageDescription']='اختيار صورة لإرفاقها بخبر في أخبار العائلة.'
  settings.pop('NSMicrophoneUsageDescription',None)
  settings['NSCameraUsageDescription']='التقاط صورة لإرفاقها بخبر في أخبار العائلة.'
  settings['NSPhotoLibraryAddUsageDescription']='حفظ صورة تختارها من أخبار العائلة.'
+ # SceneDelegate creates the CAPBridgeViewController window programmatically.
+ # Loading Main.storyboard as well creates a second window/bridge in the scene,
+ # which can leave the visible web view outside the keyboard's key window.
+ if (ios/'SceneDelegate.swift').exists():
+  settings.pop('UIMainStoryboardFile',None)
+  for configurations in settings.get('UIApplicationSceneManifest',{}).get('UISceneConfigurations',{}).values():
+   for configuration in configurations:
+    configuration.pop('UISceneStoryboardFile',None)
  p.write_bytes(plistlib.dumps(settings))
  icons=ios/'Assets.xcassets/AppIcon.appiconset';icons.mkdir(parents=True,exist_ok=True)
  icon.resize((1024,1024)).save(icons/'AppIcon-1024.png')
