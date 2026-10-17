@@ -96,7 +96,17 @@ enum CredentialStore {
     }
 }
 func q(_ key:String,_ value:String)->URLQueryItem {URLQueryItem(name:key,value:value)}
-func phone(_ input:String)throws->String {var s=input.applyingTransform(.toLatin,reverse:false) ?? input;s=s.replacingOccurrences(of:"[\\s()−-]",with:"",options:.regularExpression);if s.hasPrefix("05"),s.count==10{s="+966"+s.dropFirst()};if s.hasPrefix("00"){s="+"+s.dropFirst(2)};guard s.range(of:"^\\+[1-9][0-9]{7,14}$",options:.regularExpression) != nil else{throw FamilyError(text:"أدخل رقم جوال صحيحًا مثل 05xxxxxxxx.")};return s}
+func phone(_ input:String)throws->String {
+    let normalized=String(input.map {c -> Character in
+        if let n=c.wholeNumberValue,(0...9).contains(n){return Character(String(n))}
+        return c
+    })
+    var s=String(normalized.filter{!$0.isWhitespace && !"()-−–".contains($0)})
+    if s.hasPrefix("05"),s.count==10{s="+966"+s.dropFirst()}
+    else if s.hasPrefix("00"){s="+"+s.dropFirst(2)}
+    guard s.range(of:"^\\+[1-9][0-9]{7,14}$",options:.regularExpression) != nil else{throw FamilyError(text:"أدخل رقم جوال صحيحًا مثل 05xxxxxxxx.")}
+    return s
+}
 func dateValue(_ value:String)->Date {let f=ISO8601DateFormatter();f.formatOptions=[.withInternetDateTime,.withFractionalSeconds];return f.date(from:value) ?? ISO8601DateFormatter().date(from:value) ?? .distantPast}
 let brandBlue=Color(red:0.224,green:0.482,blue:0.612)
 let brandPink=Color(red:0.675,green:0.314,blue:0.545)
