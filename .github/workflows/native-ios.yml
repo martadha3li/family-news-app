@@ -16,7 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify native logic and security boundaries
-        run: python3 native-ios/checks/core-checks.py
+        run: |
+          python3 native-ios/checks/core-checks.py
+          python3 native-ios/checks/biometric-checks.py
       - name: Build native device archive
         run: |
           set -o pipefail
