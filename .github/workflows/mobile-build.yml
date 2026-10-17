@@ -2,7 +2,7 @@ name: Build mobile apps
 on:
   push:
     branches: [main]
-    paths: ['mobile/**', 'dist/**', '.github/workflows/mobile-build.yml']
+    paths: ['mobile/**', '!mobile/scripts/smoke-android.mjs', 'dist/**', '.github/workflows/mobile-build.yml']
   workflow_dispatch:
 permissions:
   contents: read

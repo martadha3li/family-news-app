@@ -27,5 +27,15 @@ writeFileSync('smoke-evidence/launch.json',JSON.stringify(result,null,2));
 writeFileSync('smoke-evidence/logcat.txt',adb('logcat','-d','-t','2000'));
 execFileSync('adb',['shell','screencap','-p','/sdcard/launch.png']);
 adb('pull','/sdcard/launch.png','smoke-evidence/launch.png');
-if(!result.native||!result.login||!result.body.includes('أخبار العائلة'))throw new Error('Bundled login screen was not rendered');
-console.log('PASS: native Android package launches and renders the Arabic login screen.');
+if(!result.native||!result.login||result.title!=='منصة العوائل'||!result.body.includes('اختر عائلتك'))throw new Error('Family selection screen was not rendered');
+async function iconCall(code){return await new Promise((resolve,reject)=>{
+ const ws=new WebSocket(target.webSocketDebuggerUrl);const timer=setTimeout(()=>{ws.close();reject(new Error('Icon bridge timed out'))},15000);
+ const expression='(async()=>{const m=await import("/capacitor-core.mjs");return JSON.stringify(await m.registerPlugin("FamilyBrand").setFamilyIcon({code:'+JSON.stringify(code)+'}))})()';
+ ws.onopen=()=>ws.send(JSON.stringify({id:2,method:'Runtime.evaluate',params:{expression,returnByValue:true,awaitPromise:true}}));
+ ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id!==2)return;clearTimeout(timer);ws.close();if(m.error||m.result.exceptionDetails)reject(new Error(JSON.stringify(m.error||m.result.exceptionDetails)));else resolve(JSON.parse(m.result.result.value))};ws.onerror=()=>{clearTimeout(timer);reject(new Error('Icon bridge connection failed'))};
+})}
+function enabledComponent(name){const dump=adb('shell','dumpsys','package','com.martadha3li.familynews');const block=dump.match(/(?:^|\n)\s*enabledComponents:\s*\n((?:[ \t]+[\w.$]+[ \t]*\n?)+)/)?.[1]||'';return block.includes('.'+name)}
+const selected=await iconCall('01');await delay(500);if(selected.icon!=='Family01Launcher'||!enabledComponent('Family01Launcher'))throw new Error('Family launcher icon did not activate');
+const reset=await iconCall('');await delay(500);if(reset.icon!=='PlatformLauncher'||!enabledComponent('PlatformLauncher'))throw new Error('Platform launcher icon did not restore');
+writeFileSync('smoke-evidence/icon-switch.json',JSON.stringify({selected,reset},null,2));
+console.log('PASS: Android first-use family screen, real native family-01 icon activation and platform icon reset.');

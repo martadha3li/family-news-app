@@ -1,5 +1,8 @@
 name: Test Android app launch
 on:
+  push:
+    branches: [main]
+    paths: ['mobile/scripts/smoke-android.mjs']
   workflow_dispatch:
   workflow_run:
     workflows: ['Build mobile apps']
