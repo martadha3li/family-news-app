@@ -95,7 +95,7 @@ struct HomeScreen:View {
         guard api.active,!checkedCampaign else{return};checkedCampaign=true
         let owner=api.user.id
         do{
-            let ads=try await api.table("announcements",[q("select","*"),q("is_popup","eq.true"),q("enabled","eq.true"),q("starts_at","lte."+ISO8601DateFormatter().string(from:Date())),q("ends_at","gt."+ISO8601DateFormatter().string(from:Date())),q("order","starts_at.desc,id.desc"),q("limit","200")])
+            let ads=Item.items(try await api.rpc("promo_due"))
             for ad in ads{
                 try Task.checkCancellation()
                 let key="promo-hidden-"+owner+"-"+ad.id

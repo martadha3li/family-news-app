@@ -1,3 +1,4 @@
+import {initPromotions} from './promotions.mjs';
 import {linkedNewsBody} from './profile-links.mjs';
 import {fitAnnouncements} from './announcement-layout.mjs';
 import {launchProgress,finishLaunch} from './launch.mjs';
@@ -41,8 +42,8 @@ $('auth-form').onsubmit=async e=>{e.preventDefault();await busy($('auth-submit')
 $('resend').onclick=()=>busy($('resend'),async()=>{await req('/auth/v1/resend?redirect_to='+encodeURIComponent(location.origin+'/'),{method:'POST',auth:false,body:{type:'signup',email:$('email').value.trim()}});toast('أعيد إرسال رسالة التأكيد. تحقق من البريد غير المرغوب أيضًا.')});
 $('verify-form').onsubmit=async e=>{e.preventDefault();await busy(e.submitter,async()=>{const u=new URL($('verify-link').value.trim());if(u.origin!==ORIGIN||u.pathname!=='/auth/v1/verify')throw new Error('أدخل رابط التأكيد الصادر من بريد Supabase لهذا التطبيق.');const type=u.searchParams.get('type');if(!['signup','email','magiclink','recovery'].includes(type))throw new Error('هذا الرابط ليس لتأكيد التسجيل.');const token_hash=u.searchParams.get('token');if(!token_hash)throw new Error('رابط التأكيد غير مكتمل.');const s=await req('/auth/v1/verify',{method:'POST',auth:false,body:{token_hash,type}});$('verify-link').value='';if(s?.access_token){state.recovery=type==='recovery';saveSession(s);await start()}else toast('تم تأكيد البريد. سجل الدخول الآن.')})};
 $('logout').setAttribute('aria-label','تسجيل الخروج');
-$('logout').onclick=()=>busy($('logout'),async()=>{try{await notifications.beforeLogout().catch(()=>{});await req('/auth/v1/logout',{method:'POST'})}finally{closeMenu();$('header-actions').hidden=true;document.querySelector('.private-badge').hidden=false;saveSession(null);state.user=null;state.profile=null;state.posts=[];state.ads=[];community.reset();storageAdmin.reset();state.recovery=false;$('announcement-strip').replaceChildren();$('announcement-strip').hidden=true;clearTimeout(adExpiryTimer);$('feed').replaceChildren();$('members-list').replaceChildren();$('trash-list').replaceChildren();$('app-screen').hidden=true;$('auth-screen').hidden=false;ui.sync()}});
-async function start(){if(!state.session)return;launchProgress(45,'التحقق من الجلسة');const user=await req('/auth/v1/user');launchProgress(60,'تحميل ملف العضو');state.user=user;const profiles=await table('profiles','select=id,display_name,role,status,is_root,avatar_path&id=eq.'+encodeURIComponent(user.id));if(!profiles?.[0])throw new Error('لم يكتمل إعداد الحساب. تواصل مع مدير التطبيق.');state.profile=profiles[0];await community.load();const p=state.profile;$('auth-screen').hidden=true;$('app-screen').hidden=false;$('header-actions').hidden=false;document.querySelector('.private-badge').hidden=true;$('user-name').textContent=p.display_name;$('user-role').textContent=p.is_root?'المدير الرئيسي':({admin:'مدير',journalist:'صحفي',member:'عضو'}[p.role]);const active=p.status==='active';$('pending').hidden=active;$('approved').hidden=!active;ui.sync('news');$('pending-text').textContent=p.status==='suspended'?'حسابك موقوف مؤقتًا. راجع مدير العائلة.':'أكدت بريدك بنجاح. سيعتمد المدير حسابك قبل إتاحة أخبار العائلة.';if(!active)return;await notifications.load().catch(()=>{});$('drafts-toggle').hidden=!['admin','journalist'].includes(p.role);$('new-post').hidden=!['admin','journalist'].includes(p.role);$('members-tab').hidden=p.role!=='admin';$('storage-tab').hidden=p.role!=='admin';$('trash-tab').hidden=p.role!=='admin';$('announcements-tab').hidden=p.role!=='admin';await loadActiveAnnouncements();await showSection('news');const destination=new URLSearchParams(location.search).get('open');if(destination==='chat')await showSection('chat');if(destination){const url=new URL(location.href);url.searchParams.delete('open');history.replaceState(null,'',url.pathname+url.search)}}
+$('logout').onclick=()=>busy($('logout'),async()=>{try{await notifications.beforeLogout().catch(()=>{});await req('/auth/v1/logout',{method:'POST'})}finally{closeMenu();$('header-actions').hidden=true;document.querySelector('.private-badge').hidden=false;saveSession(null);state.user=null;state.profile=null;state.posts=[];state.ads=[];community.reset();storageAdmin.reset();promotions.clear();state.recovery=false;$('announcement-strip').replaceChildren();$('announcement-strip').hidden=true;clearTimeout(adExpiryTimer);$('feed').replaceChildren();$('members-list').replaceChildren();$('trash-list').replaceChildren();$('app-screen').hidden=true;$('auth-screen').hidden=false;ui.sync()}});
+async function start(){if(!state.session)return;launchProgress(45,'التحقق من الجلسة');const user=await req('/auth/v1/user');launchProgress(60,'تحميل ملف العضو');state.user=user;const profiles=await table('profiles','select=id,display_name,role,status,is_root,avatar_path&id=eq.'+encodeURIComponent(user.id));if(!profiles?.[0])throw new Error('لم يكتمل إعداد الحساب. تواصل مع مدير التطبيق.');state.profile=profiles[0];await community.load();const p=state.profile;$('auth-screen').hidden=true;$('app-screen').hidden=false;$('header-actions').hidden=false;document.querySelector('.private-badge').hidden=true;$('user-name').textContent=p.display_name;$('user-role').textContent=p.is_root?'المدير الرئيسي':({admin:'مدير',journalist:'صحفي',member:'عضو'}[p.role]);const active=p.status==='active';$('pending').hidden=active;$('approved').hidden=!active;ui.sync('news');$('pending-text').textContent=p.status==='suspended'?'حسابك موقوف مؤقتًا. راجع مدير العائلة.':'أكدت بريدك بنجاح. سيعتمد المدير حسابك قبل إتاحة أخبار العائلة.';if(!active)return;await notifications.load().catch(()=>{});$('drafts-toggle').hidden=!['admin','journalist'].includes(p.role);$('new-post').hidden=!['admin','journalist'].includes(p.role);$('members-tab').hidden=p.role!=='admin';$('storage-tab').hidden=p.role!=='admin';$('trash-tab').hidden=p.role!=='admin';$('announcements-tab').hidden=p.role!=='admin';await loadActiveAnnouncements();await showSection('news');promotions.show().catch(()=>{});const destination=new URLSearchParams(location.search).get('open');if(destination==='chat')await showSection('chat');if(destination){const url=new URL(location.href);url.searchParams.delete('open');history.replaceState(null,'',url.pathname+url.search)}}
 $('check-status').onclick=()=>busy($('check-status'),start);
 async function showSection(section){closeMenu();for(const x of ['news','members','trash','announcements','chat','settings','review','storage']){$(x+'-section').hidden=x!==section;$(x+'-tab').classList.toggle('active',x===section)}await community.show(section);ui.sync(section);if(section==='news')await feed(true);if(section==='members')await members();if(section==='trash')await trash();if(section==='settings')await family.admin();if(section==='storage')await storageAdmin.load();if(section==='announcements'){resetAdForm();await listAnnouncements()}}
 for(const x of ['news','members','trash','announcements'])$(x+'-tab').onclick=()=>busy($(x+'-tab'),()=>showSection(x));
@@ -89,7 +90,7 @@ async function deletePost(p){
 let adExpiryTimer;
 function paintAnnouncements(){
  const now=Date.now(),box=$('announcement-strip');box.replaceChildren();
- const active=state.ads.filter(ad=>announcementState(ad,now)==='active');
+ const active=state.ads.filter(ad=>!ad.is_popup && announcementState(ad,now)==='active');
  box.hidden=active.length===0;box.setAttribute('role','group');
  for(const ad of active){const card=button('',()=>showAdDetails(ad),'announcement-banner ad-'+(ad.category||'general'));const title=element('span',ad.title?.trim()||'إعلان العائلة','announcement-title');card.append(icon(({wedding:'heart',death:'archive',commercial:'storage',urgent:'info',donation:'heart'})[ad.category]||'bell'),title);card.title=title.textContent;card.setAttribute('aria-label','تفاصيل الإعلان: '+title.textContent);box.append(card)}
  fitAnnouncements(box);
@@ -99,7 +100,7 @@ function paintAnnouncements(){
 }
 async function loadActiveAnnouncements(){
  if(!state.user||state.profile?.status!=='active')return;
- state.ads=await table('announcements','select=id,title,body,category,contact_member_id,starts_at,ends_at,enabled&enabled=eq.true&order=starts_at.desc&limit=200');
+ state.ads=await table('announcements','select=id,title,body,category,contact_member_id,is_popup,starts_at,ends_at,enabled&enabled=eq.true&order=starts_at.desc&limit=200');
  paintAnnouncements();
 }
 async function showAdDetails(ad){
@@ -114,7 +115,7 @@ function selectAdContact(id,name){adContactID=id;contactLabel.textContent=id?'@'
 contactBox.append(contactLabel,contactSearch,contactResults,button('أنا المعني بالإعلان',()=>selectAdContact(state.user.id,state.profile.display_name),'secondary'),button('إزالة جهة التواصل',()=>selectAdContact(null,''),'text-button'));$('ad-body').closest('label').after(contactBox);
 contactSearch.oninput=()=>{clearTimeout(contactSearchTimer);const version=++contactSearchVersion;contactSearchTimer=setTimeout(async()=>{try{const rows=await req('/rest/v1/rpc/mention_search',{method:'POST',body:{term:contactSearch.value.trim().replace(/^@/,'')}});if(version!==contactSearchVersion)return;contactResults.replaceChildren();for(const p of rows)contactResults.append(button('@'+p.display_name,()=>selectAdContact(p.id,p.display_name),'mention-option'));if(!rows.length)contactResults.append(element('small','لا توجد أسماء مطابقة.'));}catch{if(version===contactSearchVersion)contactResults.textContent='تعذّر البحث. حاول مجددًا.';}},180);};
 function resetAdForm(){
- state.adEdit=null;$('announcement-form').reset();contactSearchVersion++;clearTimeout(contactSearchTimer);selectAdContact(null,'');
+ state.adEdit=null;$('announcement-form').reset();promotions.reset();contactSearchVersion++;clearTimeout(contactSearchTimer);selectAdContact(null,'');
  $('ad-start').value=localInputValue(new Date());$('ad-end').value=localInputValue(Date.now()+86400000);
  $('save-ad').textContent='حفظ الإعلان';$('ad-message').textContent='';$('cancel-ad').hidden=true;
 }
@@ -126,7 +127,7 @@ $('ad-start').onchange=durationChanged;$('ad-duration').oninput=durationChanged;
 $('ad-end').onchange=()=>{const hours=(new Date($('ad-end').value)-new Date($('ad-start').value))/3600000;if(hours>0)$('ad-duration').value=Number(hours.toFixed(2))};
 $('cancel-ad').onclick=resetAdForm;
 function editAnnouncement(ad){
- state.adEdit=ad;selectAdContact(ad.contact_member_id||null,'العضو المحدد');if(ad.contact_member_id)table('profiles','select=id,display_name&id=eq.'+ad.contact_member_id).then(rows=>{if(state.adEdit?.id===ad.id&&adContactID===ad.contact_member_id&&rows[0])contactLabel.textContent='@'+rows[0].display_name;}).catch(()=>{});$('ad-category').value=ad.category||'general';$('ad-title').value=ad.title;$('ad-body').value=ad.body;
+ state.adEdit=ad;promotions.reset(ad);selectAdContact(ad.contact_member_id||null,'العضو المحدد');if(ad.contact_member_id)table('profiles','select=id,display_name&id=eq.'+ad.contact_member_id).then(rows=>{if(state.adEdit?.id===ad.id&&adContactID===ad.contact_member_id&&rows[0])contactLabel.textContent='@'+rows[0].display_name;}).catch(()=>{});$('ad-category').value=ad.category||'general';$('ad-title').value=ad.title;$('ad-body').value=ad.body;
  $('ad-start').value=localInputValue(ad.starts_at);$('ad-end').value=localInputValue(ad.ends_at);
  $('ad-duration').value=Number(((Date.parse(ad.ends_at)-Date.parse(ad.starts_at))/3600000).toFixed(2));
  $('ad-enabled').checked=ad.enabled;$('save-ad').textContent='حفظ التعديل';$('cancel-ad').hidden=false;$('ad-title').focus();
@@ -147,9 +148,11 @@ $('announcement-form').onsubmit=async e=>{e.preventDefault();await busy($('save-
  const title=$('ad-title').value.trim(),body=$('ad-body').value.trim();
  if(title.length<3||!body)throw new Error('أدخل عنوانًا من 3 أحرف على الأقل ونص الإعلان.');
  const period=announcementPeriod($('ad-start').value,$('ad-end').value);
- const values={title,body,contact_member_id:adContactID,category:$('ad-category').value,...period,enabled:$('ad-enabled').checked};
- if(state.adEdit)await table('announcements','id=eq.'+state.adEdit.id,{method:'PATCH',body:values});
+ const promo=await promotions.prepare();
+ const values={...promo.values,title,body,contact_member_id:adContactID,category:$('ad-category').value,...period,enabled:$('ad-enabled').checked};
+ try{if(state.adEdit)await table('announcements','id=eq.'+state.adEdit.id,{method:'PATCH',body:values});
  else await table('announcements','',{method:'POST',body:{...values,author_id:state.user.id}});
+ }catch(error){await promotions.rollback(promo.uploaded);throw error}
  resetAdForm();await listAnnouncements();await loadActiveAnnouncements();toast('تم حفظ الإعلان وجدولة عرضه.');
  })};
 setInterval(()=>{loadActiveAnnouncements().catch(()=>{});if(state.profile?.role==='admin'&&!$('announcements-section').hidden)listAnnouncements().catch(()=>{})},30000);
@@ -160,6 +163,7 @@ $('menu-open').onclick=()=>{$('nav-drawer').showModal();$('menu-open').setAttrib
 $('menu-close').onclick=closeMenu;
 $('nav-drawer').addEventListener('close',()=>{$('menu-open').setAttribute('aria-expanded','false');});
 $('nav-drawer').onclick=e=>{if(e.target===$('nav-drawer')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeMenu();}};
+const promotions=initPromotions({state,req,table,element,button,toast,origin:ORIGIN});
 const mentions=initMentions({$,state,table,req,button,element,toast,busy,signedImage,showSection});
 const community=initCommunity({$,state,table,req,button,element,toast,busy,start,showSection,signedImage});mentions.mount();const family=initFamily({$,state,table,req,element,button,busy,toast});const storageAdmin=initStorageAdmin({$,state,req,element,button,busy,toast,showSection});const notifications=initNotifications({$,state,req,element,button,toast});$('profile-open').onclick=(fn=>()=>{closeMenu();fn();})($('profile-open').onclick);document.querySelector('.app-nav').append($('endorsement-open'));const ui=initInterface({$,state,showSection});mode('login');
 const callback=readAuthCallback(location.hash);
