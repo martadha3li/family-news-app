@@ -34,7 +34,7 @@ struct RootScreen:View {
     @EnvironmentObject private var api:Backend
     @EnvironmentObject private var alerts:NativeNotifications
     @Environment(\.scenePhase) private var phase
-    var body:some View{Group{if api.restoring{ProgressView("جاري فتح أخبار العائلة…")}else if !api.signedIn{LoginScreen()}else{HomeScreen()}}.task{await api.restore()}.task(id:String(api.active)+String(describing:phase)){
+    var body:some View{Group{if api.restoring{LaunchScreen(progress:api.startupProgress)}else if !api.signedIn{LoginScreen()}else{HomeScreen()}}.task{await api.restore()}.task(id:String(api.active)+String(describing:phase)){
         guard api.active,phase == .active else{return};await alerts.updatePermission()
         while !Task.isCancelled && api.active && phase == .active{await alerts.refresh(api);do{try await Task.sleep(nanoseconds:15_000_000_000)}catch{break}}
     }.onChange(of:api.signedIn){_,value in if !value{alerts.reset()}}.onChange(of:api.active){_,value in if !value{alerts.reset()}}.onChange(of:phase){_,value in if value == .active,api.signedIn{Task{do{try await api.loadAccount()}catch{api.warning=api.errorText(error)}}}}}
@@ -72,4 +72,16 @@ struct HomeScreen:View {
         NavigationStack{ProfileScreen()}.tabItem{Label("حسابي",systemImage:"person.crop.circle")}.tag(2)
         NavigationStack{MoreScreen()}.tabItem{Label("المزيد",systemImage:"line.3.horizontal")}.tag(3)
     }.onReceive(NotificationCenter.default.publisher(for:.openFamilyNotifications)){_ in if api.active{chats=false;notifications=true}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.onChange(of:selection){_,value in if value==1{selection=0;chats=true}}.fullScreenCover(isPresented:$chats){NavigationStack{ChatsScreen()}.environmentObject(api)} }
+}
+
+struct LaunchScreen:View {
+    let progress:Double
+    @Environment(\.accessibilityReduceMotion)private var reduceMotion
+    @State private var animate=false
+    var body:some View {
+        ZStack{Color(.systemBackground).ignoresSafeArea();VStack(spacing:28){
+            ZStack{Circle().stroke(brandBlue.opacity(0.08),lineWidth:1).frame(width:200,height:200);Circle().trim(from:0,to:0.68).stroke(AngularGradient(colors:[brandBlue,brandPink,brandBlue.opacity(0.1)],center:.center),style:StrokeStyle(lineWidth:3,lineCap:.round)).frame(width:200,height:200).rotationEffect(.degrees(animate && !reduceMotion ? 360:0));Image("AppIconPreview").resizable().scaledToFit().frame(width:120,height:120).scaleEffect(animate && !reduceMotion ? 1.045:0.96)}
+            Brand();VStack(spacing:10){ProgressView(value:progress).tint(brandBlue).frame(width:180);Text("\(Int(progress*100))٪").font(.system(size:20,weight:.semibold,design:.rounded)).monospacedDigit();Text("جاري تهيئة أخبار العائلة").font(.footnote).foregroundStyle(.secondary)}
+        }}.onAppear{withAnimation(.easeInOut(duration:1.6).repeatForever(autoreverses:true)){animate=true}}.animation(.easeInOut(duration:0.2),value:progress)
+    }
 }

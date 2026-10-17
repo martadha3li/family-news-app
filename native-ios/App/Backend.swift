@@ -34,6 +34,7 @@ enum CredentialStore {
     @Published var user=Item()
     @Published var signedIn=false
     @Published var restoring=true
+    @Published var startupProgress=0.0
     @Published var warning=""
     private var session:[String:Any]=[:]
     private var sessionGeneration=0
@@ -79,9 +80,13 @@ enum CredentialStore {
         defer{refreshTask=nil};_ = try await task.value
     }
     private func keep(_ value:[String:Any]) throws {var s=value;if s["expires_at"]==nil {s["expires_at"]=Date().timeIntervalSince1970+(s["expires_in"] as? Double ?? 3600)};try CredentialStore.save(JSONSerialization.data(withJSONObject:s));session=s}
-    func restore() async {defer{restoring=false};guard let bytes=CredentialStore.load(),let value=(try? JSONSerialization.jsonObject(with:bytes)) as? [String:Any] else{return};session=value;do{try await loadAccount()}catch{warning=errorText(error)}}
+    func restore() async {
+        defer{restoring=false};startupProgress=0.15
+        if let bytes=CredentialStore.load(),let value=(try? JSONSerialization.jsonObject(with:bytes)) as? [String:Any]{session=value;startupProgress=0.3;do{try await loadAccount(startup:true)}catch{warning=errorText(error)}}
+        startupProgress=1;try? await Task.sleep(nanoseconds:180_000_000)
+    }
     func login(email:String,password:String) async throws {guard let s=try await request("/auth/v1/token?grant_type=password",method:"POST",body:["email":email.trimmingCharacters(in:.whitespacesAndNewlines),"password":password],auth:false) as? [String:Any] else{throw FamilyError(text:"تعذّر تسجيل الدخول.")};try keep(s);try await loadAccount()}
-    func loadAccount() async throws {let u=Item(try await request("/auth/v1/user") as? [String:Any] ?? [:]);let p=Item(try await rpc("profile_get") as? [String:Any] ?? [:]);guard !u.id.isEmpty,!p.text("status").isEmpty else{throw FamilyError(text:"لم يكتمل ملف الحساب.")};user=u;profile=p;signedIn=true;warning=""}
+    func loadAccount(startup:Bool=false) async throws {let u=Item(try await request("/auth/v1/user") as? [String:Any] ?? [:]);if startup{startupProgress=0.6};let p=Item(try await rpc("profile_get") as? [String:Any] ?? [:]);guard !u.id.isEmpty,!p.text("status").isEmpty else{throw FamilyError(text:"لم يكتمل ملف الحساب.")};if startup{startupProgress=0.9};user=u;profile=p;signedIn=true;warning=""}
     func logout() async {do {_ = try await request("/auth/v1/logout",method:"POST")}catch{};clearSession()}
     func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];CredentialStore.clear();signedIn=false;user=Item();profile=Item()}
     func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details],auth:false)}
@@ -98,6 +103,12 @@ enum CredentialStore {
         guard let bytes=result else{throw FamilyError(text:"تعذّر ضغط الصورة.")};let path=user.id+"/"+UUID().uuidString.lowercased()+".jpg"
         _ = try await request("/storage/v1/object/"+bucket+"/"+path,method:"POST",data:bytes,mime:"image/jpeg");return path
     }
+}
+struct MentionToken:Equatable {let term:String;let range:NSRange}
+func mentionToken(_ text:String,caret:Int)->MentionToken? {
+    let value=text as NSString;let end=max(0,min(caret,value.length));let prefix=value.substring(to:end) as NSString
+    guard let expression=try? NSRegularExpression(pattern:"(?:^|[\\s(])(@[^\\s@]*)$"),let match=expression.firstMatch(in:prefix as String,range:NSRange(location:0,length:prefix.length)) else{return nil}
+    let range=match.range(at:1);let token=prefix.substring(with:range);return MentionToken(term:String(token.dropFirst()),range:range)
 }
 func q(_ key:String,_ value:String)->URLQueryItem {URLQueryItem(name:key,value:value)}
 func phone(_ input:String)throws->String {

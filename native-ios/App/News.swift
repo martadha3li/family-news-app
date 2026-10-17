@@ -15,13 +15,13 @@ struct NewsScreen:View {
     @State private var more=true
     @State private var editor:Item?
     @State private var details:Item?
-    var body:some View{ScrollView{LazyVStack(spacing:18){
+    var body:some View{ScrollView{LazyVStack(spacing:12){
         LoadError(text:error)
         if posts.isEmpty && !loading{EmptyState(title:"لا توجد أخبار هنا بعد",symbol:"newspaper")}
         ForEach(posts){p in NativePost(post:p,edit:{editor=p},refresh:{await load(reset:true)},scope:scope)}
         if loading{ProgressView().padding()}
         if more && !posts.isEmpty{TaskButton(title:"عرض أخبار أقدم",symbol:"arrow.down"){await load(reset:false)}}
-    }.padding(.vertical,12).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).safeAreaInset(edge:.top,spacing:0){if scope == .published && !activeAds.isEmpty{AnnouncementTabs(ads:activeAds,open:{details=$0})}}.background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()};ToolbarItem(placement:.navigationBarLeading){NotificationBell{notifications=true}}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}}.task{await load(reset:true);while !Task.isCancelled{do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{break};now=Date()}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{ScrollView{VStack(alignment:.leading,spacing:20){Text(ad.text("title")).font(.title2.bold());Text(ad.text("body"));Text("حتى \(dateValue(ad.text("ends_at")).formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)}.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){details=nil}}}}}}
+    }.padding(.horizontal,7).padding(.vertical,10).frame(maxWidth:620).frame(maxWidth:.infinity)}.scrollIndicators(.hidden).safeAreaInset(edge:.top,spacing:0){if scope == .published && !activeAds.isEmpty{AnnouncementTabs(ads:activeAds,open:{details=$0})}}.background(Color(.systemGroupedBackground)).refreshable{await load(reset:true)}.navigationTitle(scope == .published ? "":scope.rawValue).navigationBarTitleDisplayMode(.inline).toolbar{if scope == .published{ToolbarItem(placement:.principal){Brand()};ToolbarItem(placement:.navigationBarLeading){NotificationBell{notifications=true}}};if api.writer{ToolbarItem(placement:.navigationBarTrailing){Button{editor=Item(["id":"new"])}label:{Image(systemName:"plus.app").font(.title3)}.accessibilityLabel("نشر خبر")}}}.task{await load(reset:true);while !Task.isCancelled{do{try await Task.sleep(nanoseconds:10_000_000_000)}catch{break};now=Date()}}.sheet(isPresented:$notifications){NavigationStack{NotificationsScreen()}}.sheet(item:$editor){post in NavigationStack{PostEditor(post:post.id=="new" ? nil:post){await load(reset:true)}}}.sheet(item:$details){ad in NavigationStack{ScrollView{VStack(alignment:.leading,spacing:20){Text(ad.text("title")).font(.title2.bold());Text(ad.text("body"));Text("حتى \(dateValue(ad.text("ends_at")).formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)}.padding()}.scrollIndicators(.hidden).navigationTitle("تفاصيل الإعلان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){details=nil}}}}}}
     var activeAds:[Item]{ads.filter{$0.flag("enabled") && dateValue($0.text("starts_at"))<=now && dateValue($0.text("ends_at"))>now}}
     func adColor(_ ad:Item)->Color{switch ad.text("category"){case "death":return .gray;case "urgent":return .red;case "wedding","donation":return brandPink;default:return brandBlue}}
     func load(reset:Bool)async{if loading{return};loading=true;defer{loading=false};do{var query=[q("select","*,profiles:profiles!posts_author_id_fkey(display_name,avatar_path),likes(count),comments(count)"),q("order","created_at.desc,id.desc"),q("limit","20"),q("offset",reset ? "0":String(posts.count))];switch scope{case .published:query += [q("published","eq.true"),q("deleted_at","is.null")];case .drafts:query += [q("published","eq.false"),q("author_id","eq."+api.user.id),q("deleted_at","is.null")];case .review:query += [q("moderation_status","eq.pending"),q("deleted_at","is.null")];case .hidden:query += [q("deleted_at","not.is.null")];case .mentioned:query += [q("mentioned_member_ids","cs.{"+api.user.id+"}"),q("published","eq.true"),q("deleted_at","is.null")]} ;let rows=try await api.table("posts",query);if reset{posts=rows}else{posts += rows};more=rows.count==20;error="";if scope == .published{ads=try await api.table("announcements",[q("select","*"),q("enabled","eq.true"),q("limit","200"),q("order","starts_at.desc")])}}catch{self.error=api.errorText(error)}}
@@ -35,60 +35,37 @@ struct NativePost:View {
     @State private var liked=false
     @State private var count=0
     @State private var comments=false
+    @State private var commentCount=0
     @State private var confirmDelete=false
     @State private var issue=""
     var editable:Bool{api.admin || (api.writer && post.text("author_id")==api.user.id)}
     var body:some View{VStack(alignment:.leading,spacing:0){HStack(spacing:10){Avatar(path:post.child("profiles").text("avatar_path"),name:post.child("profiles").text("display_name"));VStack(alignment:.leading,spacing:3){Text(post.child("profiles").text("display_name")).font(.subheadline.weight(.semibold));Text(dateValue(post.text("created_at")),style:.date).font(.caption2).foregroundStyle(.secondary)};Spacer();if editable{Menu{Button("تعديل الخبر",systemImage:"pencil"){edit()};Button(scope == .hidden ? "استعادة الخبر":"إخفاء الخبر",systemImage:scope == .hidden ? "arrow.uturn.backward":"eye.slash"){Task{do{_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["deleted_at":scope == .hidden ? NSNull():ISO8601DateFormatter().string(from:Date())]);await refresh()}catch{issue=api.errorText(error)}}};if api.admin{Button("حذف نهائي",systemImage:"trash",role:.destructive){confirmDelete=true}}}label:{Image(systemName:"ellipsis").frame(width:44,height:44)}}}.padding(.horizontal,14).padding(.vertical,10)
         if !post.imagePaths.isEmpty{NewsAlbum(paths:post.imagePaths)}
-        HStack(spacing:20){TaskButton(title:String(count),symbol:liked ? "heart.fill":"heart"){if liked{_ = try await api.table("likes",[q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)],method:"DELETE")}else{_ = try await api.table("likes",method:"POST",body:["post_id":post.id,"user_id":api.user.id])};liked.toggle();count += liked ? 1 : -1}.foregroundStyle(liked ? brandPink:Color.primary).accessibilityLabel(liked ? "إلغاء الإعجاب":"إعجاب");Button{comments=true}label:{Label(String(post.rows("comments").first?.number("count") ?? 0),systemImage:"bubble.right")}.accessibilityLabel("تعليقات الخبر");Spacer()}.font(.title3).buttonStyle(.plain).padding(.horizontal,16).padding(.vertical,7)
+        HStack(spacing:20){TaskButton(title:String(count),symbol:liked ? "heart.fill":"heart"){if liked{_ = try await api.table("likes",[q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)],method:"DELETE")}else{_ = try await api.table("likes",method:"POST",body:["post_id":post.id,"user_id":api.user.id])};liked.toggle();count += liked ? 1 : -1}.foregroundStyle(liked ? brandPink:Color.primary).accessibilityLabel(liked ? "إلغاء الإعجاب":"إعجاب");Button{withAnimation(.easeInOut(duration:0.2)){comments.toggle()}}label:{Label(String(commentCount),systemImage:"bubble.right")}.accessibilityLabel("تعليقات الخبر");Spacer()}.font(.title3).buttonStyle(.plain).padding(.horizontal,16).padding(.vertical,7)
         VStack(alignment:.leading,spacing:6){Text(post.text("title")).font(.subheadline.bold());Text(post.text("body")).font(.subheadline).lineSpacing(4).textSelection(.enabled);if !post.flag("published"){Text(post.text("moderation_status")=="pending" ? "بانتظار موافقة المدير":"مسودة").font(.caption).foregroundStyle(brandPink)};if scope == .review && api.admin{HStack{TaskButton(title:"اعتماد ونشر",symbol:"checkmark"){_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["published":true,"moderation_status":"published"]);await refresh()};TaskButton(title:"رفض",symbol:"xmark"){_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["published":false,"moderation_status":"rejected"]);await refresh()}}.buttonStyle(.bordered)}}.padding(.horizontal,16).padding(.bottom,18)
-    }.background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius:14)).sheet(isPresented:$comments){NavigationStack{CommentsScreen(post:post)}}.task(id:post.id){count=post.rows("likes").first?.number("count") ?? 0;do{liked = !(try await api.table("likes",[q("select","user_id"),q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)])).isEmpty}catch{}}
+            if comments{InlineComments(post:post,changed:{commentCount=max(0,commentCount+$0)}).padding(.horizontal,14).padding(.bottom,12).transition(.opacity.combined(with:.move(edge:.top)))}
+    }.background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius:12)).overlay{RoundedRectangle(cornerRadius:12).stroke(Color(.separator).opacity(0.18),lineWidth:0.5)}.task(id:post.id){commentCount=post.rows("comments").first?.number("count") ?? 0;count=post.rows("likes").first?.number("count") ?? 0;do{liked = !(try await api.table("likes",[q("select","user_id"),q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)])).isEmpty}catch{}}
     .alert("حذف الخبر نهائيًا؟",isPresented:$confirmDelete){Button("إلغاء",role:.cancel){};Button("حذف",role:.destructive){Task{do{let rows=try await api.table("posts",[q("id","eq."+post.id)],method:"DELETE");guard !rows.isEmpty else{throw FamilyError(text:"لم يتم حذف الخبر.")};for path in post.imagePaths{let shared=try await api.table("posts",[q("select","id"),q("image_paths","cs.{"+path+"}"),q("limit","1")]);if shared.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":[path]])}};await refresh()}catch{issue=api.errorText(error)}}}}message:{Text("سيُحذف الخبر وتعليقاته وإعجاباته، ولا يمكن استعادته.")}.alert("تعذّر إكمال الطلب",isPresented:Binding(get:{!issue.isEmpty},set:{if !$0{issue=""}})){Button("حسنًا",role:.cancel){}}message:{Text(issue)}}
 }
-struct CommentsScreen:View {
+struct InlineComments:View {
     @EnvironmentObject private var api:Backend
-    @Environment(\.dismiss) private var dismiss
     let post:Item
+    let changed:(Int)->Void
     @State private var rows:[Item]=[]
-    @State private var bodyText=""
+    @State private var text=""
     @State private var error=""
     @State private var more=true
-    func load(reset:Bool=true)async {
-        do {
-            let r=try await api.table("comments",[q("select","id,body,author_id,created_at,profiles:profiles!comments_author_id_fkey(display_name)"),q("post_id","eq."+post.id),q("order","created_at.asc,id.asc"),q("limit","50"),q("offset",reset ? "0":String(rows.count))])
-            if reset {rows=r} else {rows += r};more=r.count==50;error=""
-        } catch {self.error=api.errorText(error)}
-    }
     var body:some View {
-        List {
-            LoadError(text:error)
-            ForEach(rows) {r in
-                VStack(alignment:.leading,spacing:7) {
-                    Text(r.child("profiles").text("display_name")).font(.subheadline.bold())
-                    Text(r.text("body")).font(.subheadline)
-                    Text(dateValue(r.text("created_at")),style:.date).font(.caption2).foregroundStyle(.secondary)
-                }.swipeActions {
-                    if api.admin || r.text("author_id")==api.user.id {
-                        Button("حذف",role:.destructive) {
-                            Task {do {_ = try await api.table("comments",[q("id","eq."+r.id)],method:"DELETE");await load()} catch {self.error=api.errorText(error)}}
-                        }
-                    }
-                }
-            }
-            if more {TaskButton(title:"تعليقات أقدم"){await load(reset:false)}}
-        }.listStyle(.plain).scrollIndicators(.hidden)
-        .safeAreaInset(edge:.bottom) {
-            HStack {
-                TextField("أضف تعليقًا…",text:$bodyText,axis:.vertical).lineLimit(1...4).textFieldStyle(.roundedBorder)
-                TaskButton(title:"",symbol:"paperplane.fill") {
-                    let text=bodyText.trimmingCharacters(in:.whitespacesAndNewlines)
-                    guard !text.isEmpty,text.count<=2000 else{return}
-                    _ = try await api.table("comments",method:"POST",body:["post_id":post.id,"author_id":api.user.id,"body":text]);bodyText="";await load()
-                }.disabled(bodyText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty).accessibilityLabel("إرسال التعليق")
-            }.padding().background(.bar)
-        }.navigationTitle("التعليقات").navigationBarTitleDisplayMode(.inline)
-        .toolbar {ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}
-        .task {await load()}
+        VStack(alignment:.leading,spacing:13){
+            Divider();Text("التعليقات").font(.subheadline.bold());LoadError(text:error)
+            if rows.isEmpty && error.isEmpty{Text("كن أول من يعلّق على الخبر.").font(.caption).foregroundStyle(.secondary)}
+            ForEach(rows){row in HStack(alignment:.top,spacing:9){Avatar(path:row.child("profiles").text("avatar_path"),name:row.child("profiles").text("display_name"),size:30);VStack(alignment:.leading,spacing:4){Text(row.child("profiles").text("display_name")).font(.caption.bold());Text(row.text("body")).font(.subheadline).fixedSize(horizontal:false,vertical:true);Text(dateValue(row.text("created_at")),style:.relative).font(.system(size:10)).foregroundStyle(.secondary)};Spacer(minLength:0);if api.admin || row.text("author_id")==api.user.id{Menu{TaskButton(title:"حذف التعليق",symbol:"trash"){let removed=try await api.table("comments",[q("id","eq."+row.id)],method:"DELETE");if !removed.isEmpty{changed(-1)};await load()}}label:{Image(systemName:"ellipsis").foregroundStyle(.secondary).frame(width:30,height:30)}}}}
+            if more{TaskButton(title:"عرض تعليقات أخرى"){await load(reset:false)}.font(.caption)}
+            HStack(alignment:.bottom,spacing:8){Avatar(path:api.profile.text("avatar_path"),name:api.profile.text("display_name"),size:30);TextField("أضف تعليقًا…",text:$text,axis:.vertical).lineLimit(1...4).font(.subheadline).padding(10).background(Color(.secondarySystemBackground),in:RoundedRectangle(cornerRadius:18));TaskButton(title:"نشر"){let value=text.trimmingCharacters(in:.whitespacesAndNewlines);guard !value.isEmpty,value.count<=2000 else{throw FamilyError(text:"التعليق من حرف إلى 2000 حرف.")};let added=try await api.table("comments",method:"POST",body:["post_id":post.id,"author_id":api.user.id,"body":value]);if !added.isEmpty{changed(1)};text="";await load()}.font(.subheadline.bold()).disabled(text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)}
+        }.task{await load()}
+    }
+    func load(reset:Bool=true)async {
+        do{let result=try await api.table("comments",[q("select","id,body,author_id,created_at,profiles:profiles!comments_author_id_fkey(display_name,avatar_path)"),q("post_id","eq."+post.id),q("order","created_at.asc,id.asc"),q("limit","20"),q("offset",reset ? "0":String(rows.count))]);if reset{rows=result}else{rows += result};more=result.count==20;error=""}catch{self.error=api.errorText(error)}
     }
 }
 struct AnnouncementTabs:View {
@@ -100,8 +77,13 @@ struct AnnouncementTabs:View {
     var body:some View {
         ScrollView(.horizontal){HStack(spacing:8){ForEach(ads){ad in
             let tone=color(ad)
-            Button{open(ad)}label:{HStack(spacing:6){Image(systemName:ad.text("category")=="death" ? "leaf":"megaphone.fill");Text(ad.text("title")).font(.subheadline.weight(.semibold)).lineLimit(2)}.frame(minHeight:30).padding(.horizontal,14).padding(.vertical,8).foregroundStyle(tone).background(tone.opacity(0.1),in:RoundedRectangle(cornerRadius:12)).overlay{RoundedRectangle(cornerRadius:12).stroke(tone.opacity(glow && ["urgent","donation"].contains(ad.text("category")) && !reduceMotion ? 0.65:0.18),lineWidth:1.5)}}.buttonStyle(.plain).accessibilityHint("عرض تفاصيل الإعلان")
-        }}.padding(.horizontal,12).padding(.vertical,8)}.scrollIndicators(.hidden).background(.bar).onAppear{withAnimation(.easeInOut(duration:1.2).repeatForever(autoreverses:true)){glow=true}}
+            Button{open(ad)}label:{
+                HStack(spacing:8){Image(systemName:ad.text("category")=="death" ? "leaf.fill":"megaphone.fill").font(.system(size:15));Text(ad.text("title").isEmpty ? "إعلان العائلة":ad.text("title")).font(.system(size:14,weight:.semibold)).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)}
+                    .foregroundStyle(tone).frame(width:220,height:46,alignment:.leading).padding(.horizontal,13)
+                    .background(tone.opacity(0.1),in:RoundedRectangle(cornerRadius:12))
+                    .overlay{RoundedRectangle(cornerRadius:12).stroke(tone.opacity(glow && ["urgent","donation"].contains(ad.text("category")) && !reduceMotion ? 0.65:0.25),lineWidth:1)}
+            }.buttonStyle(.plain).accessibilityLabel(ad.text("title")).accessibilityHint("عرض تفاصيل الإعلان")
+        }}.padding(.horizontal,10).padding(.vertical,8)}.frame(height:64).scrollIndicators(.hidden).background(Color(.systemBackground)).overlay(alignment:.bottom){Divider()}.onAppear{if !reduceMotion{withAnimation(.easeInOut(duration:1.4).repeatForever(autoreverses:true)){glow=true}}}
     }
 }
 struct NewsAlbum:View {
@@ -135,12 +117,18 @@ struct PostEditor:View {
     @State private var search=""
     @State private var people:[Item]=[]
     @State private var selected:[Item]=[]
+    @State private var caret=NSRange(location:0,length:0)
+    @State private var inlineMembers:[Item]=[]
+    @State private var mentionError=""
     @State private var imageError=""
     var canChangePhotos:Bool{post == nil || post?.text("author_id")==api.user.id}
     init(post:Item?,saved:@escaping ()async->Void){self.post=post;self.saved=saved;_title=State(initialValue:post?.text("title") ?? "");_bodyText=State(initialValue:post?.text("body") ?? "");_publish=State(initialValue:post?.flag("published") ?? true);_album=State(initialValue:(post?.imagePaths ?? []).map{EditorPhoto(path:$0)})}
     var body:some View {
         Form {
-            Section("الخبر"){TextField("عنوان الخبر",text:$title);TextField("التفاصيل",text:$bodyText,axis:.vertical).lineLimit(5...15);Toggle("نشر الخبر الآن",isOn:$publish)}
+            Section("الخبر"){TextField("عنوان الخبر",text:$title);VStack(alignment:.leading,spacing:10){
+                    MentionEditor(text:$bodyText,selection:$caret).frame(height:180).accessibilityLabel("تفاصيل الخبر، اكتب @ للإشارة لعضو")
+                    if mentionToken(bodyText,caret:caret.location) != nil{MentionSuggestions(people:inlineMembers,issue:mentionError){person in chooseMention(person)}}
+                }.task(id:bodyText+String(caret.location)){do{guard let token=mentionToken(bodyText,caret:caret.location) else{inlineMembers=[];mentionError="";return};try await Task.sleep(nanoseconds:180_000_000);try Task.checkCancellation();let result=Item.items(try await api.rpc("mention_search",["term":token.term]));try Task.checkCancellation();inlineMembers=result;mentionError=""}catch{if !Task.isCancelled{mentionError=api.errorText(error)}}};Toggle("نشر الخبر الآن",isOn:$publish)}
             Section("صور الخبر · \(album.count) / ٥"){
                 ForEach(Array(album.enumerated()),id:\.element.id){index,photo in
                     VStack{Group{if let data=photo.data,let image=UIImage(data:data){Image(uiImage:image).resizable().scaledToFit()}else if let path=photo.path{PrivateImage(path:path,bucket:"news-images",fill:false)}}.frame(height:160)
@@ -153,7 +141,7 @@ struct PostEditor:View {
                 Text("حتى ٥ صور. إطار موحّد 4:5 بدقة تصل إلى 1080 × 1350، مع ضغط الصور والسحب بينها.").font(.caption).foregroundStyle(.secondary)
             }
             Section("منشن لأعضاء العائلة"){
-                TextField("ابحث بالاسم",text:$search).task(id:search){do{try await Task.sleep(nanoseconds:250_000_000);try Task.checkCancellation();guard search.count>=2 else{people=[];return};let r=try await api.table("profiles",[q("select","id,display_name"),q("status","eq.active"),q("display_name","ilike.*"+search.replacingOccurrences(of:"*",with:"")+"*"),q("limit","20")]);try Task.checkCancellation();people=r}catch{}}
+                TextField("@ أو بداية الاسم — الأقارب أولًا",text:$search).task(id:search){do{try await Task.sleep(nanoseconds:250_000_000);try Task.checkCancellation();let r=Item.items(try await api.rpc("mention_search",["term":search.replacingOccurrences(of:"@",with:"")]));try Task.checkCancellation();people=r}catch{}}
                 ForEach(people){p in Button{if selected.count<20 && !selected.contains(where:{$0.id==p.id}){selected.append(p)}}label:{Label(p.text("display_name"),systemImage:selected.contains(where:{$0.id==p.id}) ? "checkmark.circle.fill":"at")}}
                 ForEach(selected){p in Button(role:.destructive){selected.removeAll{$0.id==p.id}}label:{Label(p.text("display_name"),systemImage:"minus.circle")}}
             }
@@ -164,6 +152,13 @@ struct PostEditor:View {
             guard !items.isEmpty else{return};loadingPhotos=true
             Task{defer{loadingPhotos=false;photos=[]};do{var additions:[EditorPhoto]=[];for item in items.prefix(5-album.count){guard let data=try await item.loadTransferable(type:Data.self),data.count<=20*1024*1024,UIImage(data:data) != nil else{throw FamilyError(text:"اختر صورًا صالحة أقل من 20 ميجابايت لكل صورة.")};additions.append(EditorPhoto(data:data))};album += additions;imageError=""}catch{imageError=api.errorText(error)}}
         }.task{if let ids=post?.raw["mentioned_member_ids"] as? [String],!ids.isEmpty{selected=(try? await api.table("profiles",[q("select","id,display_name"),q("id","in.("+ids.joined(separator:",")+")")])) ?? []}}
+    }
+    func chooseMention(_ person:Item){
+        guard selected.contains(where:{$0.id==person.id}) || selected.count<20 else{mentionError="الحد الأقصى 20 عضوًا.";return}
+        guard let token=mentionToken(bodyText,caret:caret.location) else{return}
+        let insertion="@"+person.text("display_name")+" "
+        bodyText=(bodyText as NSString).replacingCharacters(in:token.range,with:insertion);caret=NSRange(location:token.range.location+(insertion as NSString).length,length:0)
+        if !selected.contains(where:{$0.id==person.id}){selected.append(person)};inlineMembers=[]
     }
     func save()async throws {
         guard api.writer,title.trimmingCharacters(in:.whitespaces).count>=3,title.count<=250,!bodyText.trimmingCharacters(in:.whitespaces).isEmpty,bodyText.count<=20000,album.count<=5 else{throw FamilyError(text:"أدخل عنوانًا صالحًا وتفاصيل الخبر، وبحد أقصى ٥ صور.")}
@@ -176,5 +171,32 @@ struct PostEditor:View {
         }catch{if !uploaded.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":uploaded])};throw error}
         for path in post?.imagePaths ?? [] where !paths.contains(path){if let shared=try? await api.table("posts",[q("select","id"),q("image_paths","cs.{"+path+"}"),q("limit","1")]),shared.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":[path]])}}
         await saved();dismiss()
+    }
+}
+
+struct MentionEditor:UIViewRepresentable {
+    @Binding var text:String
+    @Binding var selection:NSRange
+    func makeCoordinator()->Coordinator{Coordinator(self)}
+    func makeUIView(context:Context)->UITextView {
+        let view=UITextView();view.delegate=context.coordinator;view.font=UIFont.preferredFont(forTextStyle:.body);view.adjustsFontForContentSizeCategory=true;view.backgroundColor = .secondarySystemBackground;view.layer.cornerRadius=10;view.textContainerInset=UIEdgeInsets(top:12,left:10,bottom:12,right:10);view.textAlignment = .natural;view.semanticContentAttribute = .forceRightToLeft;view.accessibilityLabel="تفاصيل الخبر، اكتب @ للإشارة لعضو";view.keyboardDismissMode = .interactive;view.text=text;return view
+    }
+    func updateUIView(_ view:UITextView,context:Context){context.coordinator.parent=self;if view.text != text{view.text=text;let length=(text as NSString).length;view.selectedRange=NSRange(location:min(selection.location,length),length:0)}}
+    @MainActor final class Coordinator:NSObject,UITextViewDelegate {
+        var parent:MentionEditor
+        init(_ parent:MentionEditor){self.parent=parent}
+        func textViewDidChange(_ view:UITextView){parent.text=view.text;parent.selection=view.selectedRange}
+        func textViewDidChangeSelection(_ view:UITextView){if parent.selection != view.selectedRange{parent.selection=view.selectedRange}}
+    }
+}
+struct MentionSuggestions:View {
+    let people:[Item]
+    let issue:String
+    let choose:(Item)->Void
+    var body:some View {
+        VStack(alignment:.leading,spacing:0){Text("أقارب شجرتك أولًا، ثم بقية الأعضاء").font(.caption).foregroundStyle(.secondary).padding(9)
+            if !issue.isEmpty{LoadError(text:issue)}else if people.isEmpty{Text("لا توجد أسماء مطابقة").font(.caption).padding(9)}
+            ScrollView{LazyVStack(spacing:0){ForEach(people){person in Button{choose(person)}label:{HStack(spacing:9){Avatar(path:person.text("avatar_path"),name:person.text("display_name"),size:30);VStack(alignment:.leading,spacing:3){Text(person.text("display_name")).font(.subheadline);if !person.text("relation_label").isEmpty{Text(person.text("relation_label")).font(.caption).foregroundStyle(.secondary)}};Spacer();Image(systemName:"at").font(.caption)}.padding(9).contentShape(Rectangle())}.buttonStyle(.plain);Divider()}}}.frame(maxHeight:210)
+        }.background(Color(.secondarySystemBackground),in:RoundedRectangle(cornerRadius:10))
     }
 }

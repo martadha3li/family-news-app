@@ -3,6 +3,7 @@ import subprocess,tempfile,plistlib
 root=Path(__file__).resolve().parents[1]
 source=(root/'App/Backend.swift').read_text()
 core=source[source.index('struct Item:'):source.index('enum CredentialStore')]
+core += source[source.index('struct MentionToken:'):source.index('func q(')]
 core += source[source.index('func q('):source.index('let brandBlue=')]
 tests=r'''
 func expect(_ value:Bool,_ label:String) {precondition(value,label)}
@@ -15,6 +16,13 @@ expect(Item(["image_path":"old.jpg"]).imagePaths==["old.jpg"],"Legacy cover")
 expect(Item(["image_paths":["1.jpg","2.jpg"],"image_path":"1.jpg"]).imagePaths==["1.jpg","2.jpg"],"Ordered album")
 expect(Item(["image_paths":[],"image_path":NSNull()]).imagePaths.isEmpty,"No image")
 expect(Item(["image_paths":["1","2","3","4","5","6"]]).imagePaths.count==5,"Display limit")
+expect(mentionToken("مرحبا @",caret:8)?.term=="","At opens suggestions")
+let mentionText="خبر @أحمد"
+expect(mentionToken(mentionText,caret:(mentionText as NSString).length)?.term=="أحمد","Arabic mention prefix")
+expect(mentionToken("a@example.com",caret:13)==nil,"Email is not a mention")
+expect(mentionToken("مرحبا @أحمد ",caret:13)==nil,"Completed mention")
+let middle="@علي ثم باقي النص"
+expect(mentionToken(middle,caret:4)?.term=="علي","Caret in middle of text")
 let row=Item(["id":123,"body":NSNull(),"active":true,"count":9])
 expect(row.id=="123","Numeric message ID")
 expect(row.text("body")=="","JSON null")
@@ -51,3 +59,9 @@ assert 'safeAreaInset(edge:.top' in news and 'AnnouncementTabs' in news
 assert 'registerForRemoteNotifications' not in alerts
 assert 'removeAllDeliveredNotifications' in alerts and 'owner==identity' in alerts
 print('PASS: album compatibility, five-photo limit, fixed carousel, pinned announcements, notification privacy and free signing')
+
+assert 'sheet(isPresented:$comments)' not in news
+assert 'InlineComments(post:post' in news and '.frame(height:64)' in news
+assert 'MentionEditor' in news and 'mention_search' in news
+assert plist['CFBundleShortVersionString']=='$(MARKETING_VERSION)'
+print('PASS: inline comments, bounded ad bar, mention caret and dynamic build version')
