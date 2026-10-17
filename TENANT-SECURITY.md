@@ -1,0 +1,15 @@
+# Family tenants — 3.0.0
+
+Existing news, profiles, comments, likes, ads and chat records were assigned to code 01. Migration asserts unchanged record counts. It does not export or delete family data.
+
+Each account belongs to one family. Email and phone uniqueness remain global. User-supplied family_code is used only when creating the account; it does not authorize later access or move existing profiles. Selected branding is stored locally and checked against the authenticated account on login. No MAC address or fingerprinting is collected.
+
+Tenant-bound tables have a restrictive tenant RLS policy. Checked application RPCs run as a dedicated NOLOGIN, NOBYPASSRLS role that does not own tables. The role cannot be assumed by authenticated users. Existing authorization checks remain in those functions. Cross-family references are blocked by tenant reference triggers; tenant identifiers cannot be changed by users or RPCs. Storage paths must belong to profiles in the current family. Auth lookups are restricted to id/email/verification columns and same-family rows. VAPID private keys are inaccessible to this role.
+
+Central management is separately authorized against a private platform_admins registry seeded only from the already verified owner. Family administrators do not inherit platform privileges. The username admin is an alias for the owner's verified email; no default admin/admin password or new unverified superuser was created. Existing account password changes use the existing email-confirmation flow.
+
+Intended public endpoints expose active family branding, signup kinship labels and a bounded pending registration request. They expose no member directory, contacts or fees. Management/contact/payment fields remain private. The Supabase advisor flags their intentional SECURITY DEFINER API exposure; their operations are limited, parameterized and explicitly granted. The two private registry tables intentionally deny direct row access. Existing leaked-password protection remains a hosting configuration advisory; no paid service was enabled.
+
+Fees and settlement are manual records. Activation requires paid or waived status. No payment gateway is integrated and no billing plan was upgraded. Hosting limits and physical storage metrics remain shared across the project; reference limits do not buy capacity. This version uses one installed app with contextual family branding, not separately published store binaries per family. iOS system app icon remains the packaged app icon.
+
+Tests: two-family isolation for profiles, news, public/private chat, groups, mention search, profile access, likes, separate admin privileges, suspension, record preservation and denial of secret reads. Signup/contact and existing chat restrictions passed after migration. Web tests cover selection confirmation, saved branding, mismatched account rejection, family exit and management save payloads. Native core/biometric checks and unsigned device archive succeeded. Physical iPhone UI verification remains to be done by device installation.

@@ -40,7 +40,7 @@ revoke all on function family_private.current_tenant() from public,anon;grant ex
 create function family_private.keep_tenant() returns trigger language plpgsql set search_path='' as $$begin if new.tenant_id is distinct from old.tenant_id and current_user<>'postgres' then raise exception 'لا يمكن نقل بيانات بين الكيانات';end if;return new;end$$;
 revoke all on function family_private.keep_tenant() from public,anon,authenticated;
 create function family_private.check_tenant_ref() returns trigger language plpgsql security definer set search_path='' as $$declare target uuid;value text:=to_jsonb(new)->>TG_ARGV[1];begin
- if value is not null then execute format('select tenant_id from %s where %I::text=$1',TG_ARGV[0]::oid::regclass,TG_ARGV[2])into target using value;
+ if value is not null then execute format('select tenant_id from %s where %I::text=$1',TG_ARGV[0]::regclass,TG_ARGV[2])into target using value;
  if target is not null and target<>new.tenant_id then raise exception 'لا يمكن الربط بين كيانات مختلفة';end if;end if;return new;end$$;
 revoke all on function family_private.check_tenant_ref() from public,anon,authenticated;
 do $$declare r record;begin
@@ -58,7 +58,7 @@ do $$declare r record;begin
  if r.confrelid='public.kinship_options'::regclass then
  execute format('alter table %s add constraint %I foreign key(tenant_id,%s) references %s(tenant_id,%s) deferrable initially deferred',r.conrelid::regclass,r.conname,r.local_cols,r.confrelid::regclass,r.ref_cols);
  else
- execute format('create trigger %I before insert or update on %s for each row execute function family_private.check_tenant_ref(%L,%L,%L)','tenant_'||r.conname,r.conrelid::regclass,r.confrelid::text,r.local_cols,r.ref_cols);
+ execute format('create trigger %I before insert or update on %s for each row execute function family_private.check_tenant_ref(%L,%L,%L)','tenant_'||r.conname,r.conrelid::regclass,(select format('%I.%I',n.nspname,c.relname)from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.oid=r.confrelid),r.local_cols,r.ref_cols);
  end if;
  end loop;
 end$$;
