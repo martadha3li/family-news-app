@@ -50,7 +50,12 @@ extension Notification.Name {static let openFamilyNotifications=Notification.Nam
 struct NotificationBell:View {
     @EnvironmentObject private var alerts:NativeNotifications
     let open:()->Void
-    var body:some View {Button(action:open){Image(systemName:"bell").font(.title3).frame(width:44,height:44).overlay(alignment:.topTrailing){if alerts.unread>0{Text(alerts.unread>99 ? "99+":String(alerts.unread)).font(.system(size:10,weight:.bold)).padding(4).foregroundStyle(.white).background(brandPink,in:Capsule())}}.accessibilityLabel("الإشعارات، \(alerts.unread) غير مقروءة")}
+    var body:some View {
+        Button(action:open){
+            Image(systemName:"bell").font(.title3).frame(width:44,height:44)
+                .overlay(alignment:.topTrailing){if alerts.unread>0{Text(alerts.unread>99 ? "99+":String(alerts.unread)).font(.system(size:10,weight:.bold)).padding(4).foregroundStyle(.white).background(brandPink,in:Capsule())}}
+        }.accessibilityLabel("الإشعارات، \(alerts.unread) غير مقروءة")
+    }
 }
 struct NotificationsScreen:View {
     @EnvironmentObject private var api:Backend
