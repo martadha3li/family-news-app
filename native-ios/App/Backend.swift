@@ -94,8 +94,9 @@ enum CredentialStore {
     func logout() async {do {_ = try await request("/auth/v1/logout",method:"POST")}catch{};clearSession()}
     func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];if !isolatedSession{CredentialStore.clear()};signedIn=false;platformAdmin=false;user=Item();profile=Item()}
     func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details.merging(["family_code":family.text("code")]){_,new in new}],auth:false)}
-    func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw.filter{!($0.value is NSNull)},forKey:"family-selection")}
-    func exitFamily()async{await logout();family=Item();UserDefaults.standard.removeObject(forKey:"family-selection")}
+    func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw.filter{!($0.value is NSNull)},forKey:"family-selection");syncFamilyIcon()}
+    func exitFamily()async{await logout();family=Item();UserDefaults.standard.removeObject(forKey:"family-selection");syncFamilyIcon()}
+    func syncFamilyIcon(){TenantAppIcon.request(family){[weak self] message in self?.warning=message}}
     func platformLogin(username:String,password:String)async throws{
         isolatedSession=true
         let email=username.lowercased()=="admin" ? "martadha3li@gmail.com":username
@@ -154,3 +155,31 @@ func phone(_ input:String)throws->String {
 func dateValue(_ value:String)->Date {let f=ISO8601DateFormatter();f.formatOptions=[.withInternetDateTime,.withFractionalSeconds];return f.date(from:value) ?? ISO8601DateFormatter().date(from:value) ?? .distantPast}
 let brandBlue=Color(red:0.224,green:0.482,blue:0.612)
 let brandPink=Color(red:0.675,green:0.314,blue:0.545)
+
+func desiredFamilyIcon(code:String,identifier:String,available:Set<String>)->String?{
+    if code=="01",available.contains("Family01"){return "Family01"}
+    let key="Family_"+identifier.replacingOccurrences(of:"-",with:"").lowercased()
+    return !identifier.isEmpty && available.contains(key) ? key:nil
+}
+@MainActor enum TenantAppIcon {
+    private static var wanted:String?
+    private static var busy=false
+    private static var report:((String)->Void)?
+    static func request(_ family:Item,report:@escaping(String)->Void){
+        let info=Bundle.main.infoDictionary ?? [:]
+        let icons=(info["CFBundleIcons"]as? [String:Any]) ?? (info["CFBundleIcons~ipad"]as? [String:Any]) ?? [:]
+        let available=Set((icons["CFBundleAlternateIcons"]as? [String:Any] ?? [:]).keys)
+        wanted=desiredFamilyIcon(code:family.text("code"),identifier:family.id,available:available)
+        self.report=report;apply()
+    }
+    private static func apply(){
+        let app=UIApplication.shared
+        guard !busy,app.applicationState == .active,app.supportsAlternateIcons,app.alternateIconName != wanted else{return}
+        busy=true;let target=wanted
+        app.setAlternateIconName(target){error in Task{@MainActor in
+            busy=false
+            if let error=error{report?("تعذّر تغيير أيقونة التطبيق: "+error.localizedDescription)}
+            if wanted != target{apply()}
+        }}
+    }
+}

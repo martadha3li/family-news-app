@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>ar</string>
 	<key>CFBundleDisplayName</key>
-	<string>أخبار العائلة</string>
+	<string>العوائل</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -34,7 +34,7 @@
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIImageName</key>
-		<string>FamilyLogo</string>
+		<string>PlatformLogo</string>
 		<key>UIImageRespectsSafeAreaInsets</key>
 		<true/>
 	</dict>

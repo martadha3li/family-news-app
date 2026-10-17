@@ -19,7 +19,7 @@ struct TaskButton:View {
 }
 struct LoadError:View {let text:String;var body:some View{if !text.isEmpty{Text(text).font(.footnote).foregroundStyle(.red).padding().frame(maxWidth:.infinity)}}}
 struct EmptyState:View {let title:String;var symbol="tray";var body:some View{VStack(spacing:12){Image(systemName:symbol).font(.system(size:38,weight:.light)).foregroundStyle(brandBlue);Text(title).font(.headline)}.frame(maxWidth:.infinity).padding(.vertical,50)}}
-struct Brand:View {@EnvironmentObject private var api:Backend;var body:some View{HStack{if let image=tenantLogo(api.family){Image(uiImage:image).resizable().scaledToFit().frame(width:48,height:42);Text(api.family.text("name")).font(.headline).lineLimit(1)}else{Image("FamilyLogo").resizable().scaledToFit().frame(width:135,height:42)}}.accessibilityLabel(api.family.text("name").isEmpty ? "أخبار العائلة":api.family.text("name"))}}
+struct Brand:View {@EnvironmentObject private var api:Backend;var body:some View{HStack{if let image=tenantLogo(api.family){Image(uiImage:image).resizable().scaledToFit().frame(width:48,height:42);Text(api.family.text("name")).font(.headline).lineLimit(1)}else if api.family.text("code")=="01"{Image("FamilyLogo").resizable().scaledToFit().frame(width:135,height:42)}else{Image("PlatformLogo").resizable().scaledToFit().frame(width:42,height:42);Text(api.family.text("name").isEmpty ? "منصة العوائل":api.family.text("name")).font(.headline)}}.accessibilityLabel(api.family.text("name").isEmpty ? "أخبار العائلة":api.family.text("name"))}}
 func tenantLogo(_ tenant:Item)->UIImage?{guard let encoded=tenant.text("logo").split(separator:",").last,tenant.text("logo").hasPrefix("data:image/jpeg;base64,"),let data=Data(base64Encoded:String(encoded))else{return nil};return UIImage(data:data)}
 struct PrivateImage:View {
     @EnvironmentObject private var api:Backend
@@ -44,7 +44,7 @@ struct RootScreen:View {
             else if api.restoring{LaunchScreen(progress:api.startupProgress)}
             else if !api.signedIn{LoginScreen()}
             else{HomeScreen()}
-        }.task(id:api.family.id){if api.family.id.isEmpty{api.restoring=false}else{await gate.start(api)}}
+        }.task(id:api.family.id){api.syncFamilyIcon();if api.family.id.isEmpty{api.restoring=false}else{await gate.start(api)}}
         .task(id:String(api.active)+String(gate.unlocked)+String(describing:phase)){
             guard api.active,gate.unlocked,phase == .active else{return};await alerts.updatePermission()
             while !Task.isCancelled && api.active && gate.unlocked && phase == .active{await alerts.refresh(api);do{try await Task.sleep(nanoseconds:15_000_000_000)}catch{break}}
@@ -55,7 +55,7 @@ struct RootScreen:View {
         .onChange(of:api.active){_,value in if !value{alerts.reset()}}
         .onChange(of:phase){_,value in
             if value == .background{gate.lock();alerts.visibleThread=""}
-            if value == .active{Task{await gate.open(api)}}
+            if value == .active{api.syncFamilyIcon();Task{await gate.open(api)}}
         }
     }
 }
@@ -118,7 +118,7 @@ struct LaunchScreen:View {
     @State private var animate=false
     var body:some View {
         ZStack{Color(.systemBackground).ignoresSafeArea();VStack(spacing:28){
-            ZStack{Circle().stroke(brandBlue.opacity(0.08),lineWidth:1).frame(width:200,height:200);Circle().trim(from:0,to:0.68).stroke(AngularGradient(colors:[brandBlue,brandPink,brandBlue.opacity(0.1)],center:.center),style:StrokeStyle(lineWidth:3,lineCap:.round)).frame(width:200,height:200).rotationEffect(.degrees(animate && !reduceMotion ? 360:0));Group{if let logo=tenantLogo(api.family){Image(uiImage:logo).resizable().scaledToFit()}else{Image("AppIconPreview").resizable().scaledToFit()}}.frame(width:120,height:120).scaleEffect(animate && !reduceMotion ? 1.045:0.96)}
+            ZStack{Circle().stroke(brandBlue.opacity(0.08),lineWidth:1).frame(width:200,height:200);Circle().trim(from:0,to:0.68).stroke(AngularGradient(colors:[brandBlue,brandPink,brandBlue.opacity(0.1)],center:.center),style:StrokeStyle(lineWidth:3,lineCap:.round)).frame(width:200,height:200).rotationEffect(.degrees(animate && !reduceMotion ? 360:0));Group{if let logo=tenantLogo(api.family){Image(uiImage:logo).resizable().scaledToFit()}else{Image(api.family.text("code")=="01" ? "Family01Preview":"AppIconPreview").resizable().scaledToFit()}}.frame(width:120,height:120).scaleEffect(animate && !reduceMotion ? 1.045:0.96)}
             Brand();VStack(spacing:10){ProgressView(value:progress).tint(brandBlue).frame(width:180);Text("\(Int(progress*100))٪").font(.system(size:20,weight:.semibold,design:.rounded)).monospacedDigit();Text("جاري تهيئة أخبار العائلة").font(.footnote).foregroundStyle(.secondary)}
         }}.onAppear{withAnimation(.easeInOut(duration:1.6).repeatForever(autoreverses:true)){animate=true}}.animation(.easeInOut(duration:0.2),value:progress)
     }
@@ -199,7 +199,7 @@ struct TenantSelectionScreen:View {
     @State private var request=false
     @State private var platform=false
     var body:some View{NavigationStack{List{
-        Section{Text("اختر عائلتك مرة واحدة. يُحفظ الاختيار على هذا الجهاز، ويمكن تغييره لاحقًا.").font(.subheadline);TextField("كود العائلة أو اسمها",text:$term).textInputAutocapitalization(.never);LoadError(text:error)}
+        Section{Brand().frame(maxWidth:.infinity).padding(.vertical,12);Text("اختر عائلتك مرة واحدة. يُحفظ الاختيار على هذا الجهاز، ويمكن تغييره لاحقًا.").font(.subheadline);TextField("كود العائلة أو اسمها",text:$term).textInputAutocapitalization(.never);LoadError(text:error)}
         Section("العوائل المتاحة"){ForEach(families){family in Button{selected=family}label:{HStack(spacing:12){if let image=tenantLogo(family){Image(uiImage:image).resizable().scaledToFit().frame(width:48,height:48)};VStack(alignment:.leading){Text(family.text("name")).font(.headline);Text("الكود "+family.text("code")).font(.caption)}}}}}
         Section{Button("تسجيل عائلة جديدة"){request=true};Button("دخول إدارة المنصة"){platform=true}}
     }.navigationTitle("أهلًا بك").task(id:term){do{try await Task.sleep(nanoseconds:220_000_000);let rows=Item.items(try await api.request("/rest/v1/rpc/tenant_directory",method:"POST",body:["term":term],auth:false));try Task.checkCancellation();families=rows;error=""}catch{if !Task.isCancelled{self.error=api.errorText(error)}}}
