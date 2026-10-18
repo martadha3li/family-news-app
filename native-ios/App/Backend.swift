@@ -46,7 +46,8 @@ enum CredentialStore {
     private let network:URLSession = { let c=URLSessionConfiguration.ephemeral; c.urlCache=nil; c.requestCachePolicy = .reloadIgnoringLocalCacheData; c.timeoutIntervalForRequest=30; return URLSession(configuration:c) }()
     var active:Bool { signedIn && profile.text("status")=="active" }
     var admin:Bool { active && profile.text("role")=="admin" }
-    var writer:Bool { active && ["admin","journalist"].contains(profile.text("role")) }
+    var readOnly:Bool { family.flag("read_only") || (!family.text("subscription_ends_at").isEmpty && dateValue(family.text("subscription_ends_at"))<=Date()) }
+    var writer:Bool { active && !readOnly && ["admin","journalist"].contains(profile.text("role")) }
     func errorText(_ error:Error)->String { let m=error.localizedDescription; if m.contains("Invalid login credentials"){return "البريد أو كلمة المرور غير صحيحة."}; if m.contains("Email not confirmed"){return "أكد بريدك من الرسالة أولًا."}; if m.lowercased().contains("rate limit"){return "انتظر قليلًا قبل إعادة المحاولة."}; return m }
     func request(_ path:String,method:String="GET",body:[String:Any]?=nil,auth:Bool=true,data:Data?=nil,mime:String="application/json") async throws -> Any {
         let generation=sessionGeneration
@@ -96,6 +97,11 @@ enum CredentialStore {
     func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details.merging(["family_code":family.text("code")]){_,new in new}],auth:false)}
     func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw.filter{!($0.value is NSNull)},forKey:"family-selection");syncFamilyIcon()}
     func exitFamily()async{await logout();family=Item();UserDefaults.standard.removeObject(forKey:"family-selection");syncFamilyIcon()}
+    func checkFamilyAccess()async {
+        let epoch=sessionGeneration
+        guard signedIn else{return}
+        do{let current=Item(try await rpc("tenant_current")as? [String:Any] ?? [:]);guard epoch==sessionGeneration else{return};if current.text("status") != "active"{clearSession();warning="دخول الكيان معلّق أو موقوف"}else if current.id==family.id{family=current}}catch{}
+    }
     func syncFamilyIcon(){TenantAppIcon.request(family){[weak self] message in self?.warning=message}}
     func platformLogin(username:String,password:String)async throws{
         isolatedSession=true

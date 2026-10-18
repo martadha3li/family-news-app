@@ -47,7 +47,7 @@ struct RootScreen:View {
         }.task(id:api.family.id){api.syncFamilyIcon();if api.family.id.isEmpty{api.restoring=false}else{await gate.start(api)}}
         .task(id:String(api.active)+String(gate.unlocked)+String(describing:phase)){
             guard api.active,gate.unlocked,phase == .active else{return};await alerts.updatePermission()
-            while !Task.isCancelled && api.active && gate.unlocked && phase == .active{await alerts.refresh(api);do{try await Task.sleep(nanoseconds:15_000_000_000)}catch{break}}
+            while !Task.isCancelled && api.active && gate.unlocked && phase == .active{await api.checkFamilyAccess();guard api.active else{break};await alerts.refresh(api);do{try await Task.sleep(nanoseconds:15_000_000_000)}catch{break}}
         }
         .onReceive(NotificationCenter.default.publisher(for:UIApplication.willResignActiveNotification)){_ in PrivacyShield.show()}
         .onReceive(NotificationCenter.default.publisher(for:UIApplication.didBecomeActiveNotification)){_ in PrivacyShield.hide()}
@@ -93,8 +93,8 @@ struct HomeScreen:View {
         if api.active{Color.clear.tabItem{Label("الدردشات",systemImage:"bubble.left.and.bubble.right")}.tag(1)}
         NavigationStack{ProfileScreen()}.tabItem{Label("حسابي",systemImage:"person.crop.circle")}.tag(2)
         NavigationStack{MoreScreen()}.tabItem{Label("المزيد",systemImage:"line.3.horizontal")}.tag(3)
-    }.task(id:api.active){
-        guard api.active,!checkedCampaign else{return};checkedCampaign=true
+    }.safeAreaInset(edge:.top){if api.readOnly{Text("انتهى الاشتراك · للاطلاع فقط").font(.footnote).padding(8).frame(maxWidth:.infinity).background(Color.orange.opacity(0.15))}}.task(id:api.active){
+        guard api.active,!api.readOnly,!checkedCampaign else{return};checkedCampaign=true
         let owner=api.user.id
         do{
             let ads=Item.items(try await api.rpc("promo_due"))
@@ -253,7 +253,7 @@ struct TenantPlatformEditor:View {
     @State private var payment="unpaid"
     @State private var fee="0"
     @State private var notes=""
-    var body:some View{Form{Section("بيانات الكيان"){TextField("اسم العائلة",text:$name);TextField("الكود",text:$code).textInputAutocapitalization(.never);Text(family.text("contact_email"));Text(family.text("contact_phone"))};Section("السداد والتفعيل"){TextField("الرسوم بالريال",text:$fee).keyboardType(.decimalPad);Picker("السداد",selection:$payment){Text("غير مسدد").tag("unpaid");Text("مسدد").tag("paid");Text("معفى").tag("waived")};Picker("الحالة",selection:$status){Text("بانتظار التفعيل").tag("pending");Text("مفعّل").tag("active");Text("موقوف").tag("suspended");Text("مرفوض").tag("rejected")};TextField("ملاحظات الإدارة",text:$notes,axis:.vertical)};Section("الاشتراك"){NavigationLink("فترة الاشتراك والتجديد"){TenantSubscriptionEditor(family:family,saved:saved)}};TaskButton(title:"حفظ التغييرات",symbol:"checkmark"){guard let amount=Double(fee),amount>=0 else{throw FamilyError(text:"تحقق من الرسوم")};_ = try await api.rpc("platform_action",["action":"save","data":["id":family.id,"name":name,"code":code,"status":status,"payment_status":payment,"fee_sar":amount,"notes":notes]]);await saved();dismiss()}}.navigationTitle("إدارة الكيان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onAppear{name=family.text("name");code=family.text("code");status=family.text("status");payment=family.text("payment_status");fee=family.text("fee_sar");notes=family.text("notes")}}
+    var body:some View{Form{Section("بيانات الكيان"){TextField("اسم العائلة",text:$name);TextField("الكود",text:$code).textInputAutocapitalization(.never);Text(family.text("contact_email"));Text(family.text("contact_phone"))};Section("السداد والتفعيل"){TextField("الرسوم بالريال",text:$fee).keyboardType(.decimalPad);Picker("السداد",selection:$payment){Text("غير مسدد").tag("unpaid");Text("مسدد").tag("paid");Text("معفى").tag("waived")};Picker("الحالة",selection:$status){Text("بانتظار التفعيل").tag("pending");Text("مفعّل").tag("active");Text("موقوف").tag("suspended");Text("مرفوض").tag("rejected")};TextField("ملاحظات الإدارة",text:$notes,axis:.vertical)};Section("الاشتراك"){NavigationLink("فترة الاشتراك والتجديد"){TenantSubscriptionEditor(family:family,saved:saved)};NavigationLink("الاستهلاك والدخول والصيانة"){TenantOperationsScreen(family:family)}};TaskButton(title:"حفظ التغييرات",symbol:"checkmark"){guard let amount=Double(fee),amount>=0 else{throw FamilyError(text:"تحقق من الرسوم")};_ = try await api.rpc("platform_action",["action":"save","data":["id":family.id,"name":name,"code":code,"status":status,"payment_status":payment,"fee_sar":amount,"notes":notes]]);await saved();dismiss()}}.navigationTitle("إدارة الكيان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onAppear{name=family.text("name");code=family.text("code");status=family.text("status");payment=family.text("payment_status");fee=family.text("fee_sar");notes=family.text("notes")}}
 }
 
 let subscriptionPlans:[(String,String)]=[("12","سنة"),("24","سنتان"),("36","٣ سنوات"),("6","٦ أشهر")]
@@ -336,7 +336,7 @@ struct TenantSubscriptionEditor:View {
                 DatePicker("إلى",selection:$end,displayedComponents:[.date,.hourAndMinute])
                 Text(subscriptionDuration(start,end)).font(.footnote)
             }
-            Text("التواريخ بتوقيت الرياض. عرض نهاية الاشتراك لا يوقف الكيان تلقائيًا؛ الإيقاف من حالة الكيان.").font(.footnote).foregroundStyle(.secondary)
+            Text("التواريخ بتوقيت الرياض. بعد نهاية الاشتراك يصبح الكيان للاطلاع فقط، ويبقى إيقاف الدخول قرارًا منفصلًا.").font(.footnote).foregroundStyle(.secondary)
         }
     }
     var pricingSection:some View {
@@ -363,5 +363,86 @@ struct TenantSubscriptionEditor:View {
         .onAppear{display(family)}
         .task{do{try await refresh()}catch{self.error=api.errorText(error)}}
         .confirmationDialog("تأكيد التجديد",isPresented:$confirm,titleVisibility:.visible){Button("تنفيذ التجديد"){Task{await renew()}}}message:{Text(confirmationText)}
+    }
+}
+
+func usageBytes(_ value:Int)->String{ByteCountFormatter.string(fromByteCount:Int64(value),countStyle:.file)}
+struct TenantOperationsScreen:View {
+    @EnvironmentObject private var api:Backend
+    let family:Item
+    @State private var record=Item()
+    @State private var operations=Item()
+    @State private var usage=Item()
+    @State private var trusted=true
+    @State private var kinship=true
+    @State private var relations:[String:Bool]=[:]
+    @State private var until=Date().addingTimeInterval(86400)
+    @State private var reason=""
+    @State private var error=""
+    @State private var mode=""
+    @State private var confirm=false
+    @State private var preview:Item?
+    func rpc(_ action:String,_ extra:[String:Any]=[:])async throws->Any{try await api.rpc("platform_action",["action":action,"data":extra.merging(["id":family.id]){_,new in new}])}
+    func load()async{do{record=Item.items(try await api.rpc("platform_action",["action":"list"])).first{$0.id==family.id} ?? family;operations=Item(try await rpc("operations")as? [String:Any] ?? [:]);usage=Item(try await rpc("usage")as? [String:Any] ?? [:]);trusted=operations.flag("trusted");kinship=operations.flag("kinship");for r in operations.rows("relations"){relations[r.text("code")]=r.flag("allowed")};error=""}catch{self.error=api.errorText(error)}}
+    var accessSection:some View {
+        Section("الدخول والاشتراك"){
+            Text(subscriptionSummary(record));Text("حالة الدخول: "+record.text("login_access"))
+            DatePicker("نهاية التعليق · الرياض",selection:$until,in:Date()...,displayedComponents:[.date,.hourAndMinute])
+            Button{mode="suspended";confirm=true}label:{Label("تعليق الدخول مؤقتًا",systemImage:"pause.circle")}
+            Button(role:.destructive){mode="blocked";confirm=true}label:{Label("إيقاف الدخول حتى إعادة فتحه",systemImage:"hand.raised")}
+            Button{mode="allowed";confirm=true}label:{Label("إتاحة الدخول",systemImage:"play.circle")}
+        }
+    }
+    var usageSection:some View {
+        Section("استهلاك الكيان"){
+            LabeledContent("السجلات · تقدير",value:usageBytes(usage.number("row_bytes_estimate")))
+            LabeledContent("الصور والملفات",value:usageBytes(usage.number("file_bytes")))
+            Text("\(usage.number("users")) عضو · \(usage.number("news")) خبر · \(usage.number("messages")) رسالة · \(usage.number("groups")) مجموعة")
+            Text("تقدير السجلات لا يشمل تخصيص الفهارس والمساحة المشتركة. حدود الاستضافة مشتركة بين الكيانات.").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+    var policySection:some View {
+        Section("استثناءات الخاص"){
+            Toggle("التعريف المقبول",isOn:$trusted);Toggle("القرابة المؤكدة",isOn:$kinship)
+            ForEach(operations.rows("relations"),id:\.rawCode){r in Toggle(r.text("label"),isOn:Binding(get:{relations[r.text("code")] ?? false},set:{relations[r.text("code")]=$0}))}
+            TaskButton(title:"حفظ ضوابط التواصل",symbol:"checkmark"){_ = try await rpc("chat_policy",["trusted":trusted,"kinship":kinship,"relations":relations.filter{$0.value}.map{$0.key}]);await load()}
+        }
+    }
+    var maintenanceSection:some View {
+        Section("دخول الصيانة بموافقة مدير الكيان"){
+            Text("تصريح ساعتين لقراءة الأخبار والإعدادات والتشخيص فقط. لا يشمل الرسائل الخاصة أو تعديل البيانات.").font(.footnote)
+            TextField("سبب طلب الصيانة",text:$reason,axis:.vertical)
+            TaskButton(title:"إرسال طلب موافقة",symbol:"wrench.and.screwdriver"){_ = try await rpc("maintenance_request",["reason":reason]);reason="";await load()}
+            ForEach(operations.rows("maintenance")){r in VStack(alignment:.leading,spacing:8){Text(r.text("reason"));Text(r.text("status")).font(.caption).foregroundStyle(.secondary);if r.text("status")=="approved" && dateValue(r.text("expires_at"))>Date(){Button("دخول الصيانة المصرّح"){preview=r}}}}
+        }
+    }
+    var body:some View {
+        Form{LoadError(text:error);accessSection;usageSection;policySection;maintenanceSection}.navigationTitle(family.text("name")).environment(\.timeZone,TimeZone(identifier:"Asia/Riyadh")!).task{await load()}.refreshable{await load()}.confirmationDialog("تأكيد تغيير الدخول",isPresented:$confirm,titleVisibility:.visible){Button("تأكيد"){
+            Task{do{var data:[String:Any]=["mode":mode];if mode=="suspended"{data["until"]=ISO8601DateFormatter().string(from:until)};_ = try await rpc("login_access",data);await load()}catch{self.error=api.errorText(error)}}
+        }}message:{Text(mode=="allowed" ? "إعادة إتاحة دخول أعضاء الكيان؟":"سيمنع دخول أعضاء هذا الكيان، مع حفظ البيانات.")}.sheet(item:$preview){r in NavigationStack{MaintenancePreviewScreen(family:family,request:r)}}
+    }
+}
+struct FamilyMaintenanceScreen:View {
+    @EnvironmentObject private var api:Backend
+    @State private var rows:[Item]=[]
+    @State private var error=""
+    @State private var selected:Item?
+    @State private var action=""
+    func load()async{do{rows=Item.items(try await api.action("maintenance_action","list"));error=""}catch{self.error=api.errorText(error)}}
+    func choose(_ r:Item,_ operation:String){selected=r;action=operation}
+    var body:some View {
+        List{Text("الموافقة تمنح إدارة المنصة ساعتين لقراءة أخبار العائلة وإعداداتها وتشخيصها. لا تتيح الرسائل الخاصة أو تعديل البيانات. يمكنك الإلغاء فورًا.").font(.footnote);LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:10){Text(r.text("reason")).font(.headline);Text(r.text("status")).font(.caption);if !r.text("expires_at").isEmpty{Text("ينتهي: "+dateValue(r.text("expires_at")).formatted())};if r.text("status")=="pending"{Button("موافقة لمدة ساعتين"){choose(r,"approve")};Button("رفض",role:.destructive){choose(r,"reject")}}else if r.text("status")=="approved"{Button("إلغاء تصريح الصيانة",role:.destructive){choose(r,"revoke")}}}}}.navigationTitle("طلبات صيانة المنصة").task{await load()}.refreshable{await load()}.confirmationDialog("تأكيد قرار الصيانة",isPresented:Binding(get:{selected != nil},set:{if !$0{selected=nil}}),titleVisibility:.visible){Button("تأكيد"){guard let r=selected else{return};selected=nil;Task{do{_ = try await api.action("maintenance_action",action,["id":r.id]);await load()}catch{self.error=api.errorText(error)}}}}message:{Text(action=="approve" ? "أوافق على إتاحة قراءة أخبار الكيان وإعداداته لإدارة المنصة لمدة ساعتين، دون الرسائل الخاصة أو التعديل.":"تأكيد رفض الطلب أو إلغاء التصريح؟")}
+    }
+}
+struct MaintenancePreviewScreen:View {
+    @EnvironmentObject private var api:Backend
+    @Environment(\.dismiss)private var dismiss
+    @Environment(\.scenePhase)private var phase
+    let family:Item
+    let request:Item
+    @State private var data=Item()
+    @State private var error=""
+    var body:some View {
+        List{Text(data.text("scope")).font(.footnote);LoadError(text:error);if !data.text("expires_at").isEmpty{Text("ينتهي التصريح: "+dateValue(data.text("expires_at")).formatted())};Section("الأخبار · قراءة فقط"){ForEach(data.rows("news")){p in VStack(alignment:.leading,spacing:8){Text(p.text("title")).font(.headline);Text(p.text("body"))}}};Section("تشخيص الإعدادات"){ForEach([("chat_enabled","الدردشة"),("private_chat_enabled","الخاص"),("restrict_gender_chat","فصل الجنسين"),("journalist_approval","موافقة نشر الصحفي")],id:\.0){key,label in LabeledContent(label,value:data.child("settings").flag(key) ? "مفعّل":"معطّل")}}}.navigationTitle("صيانة "+family.text("name")).toolbar{ToolbarItem(placement:.cancellationAction){Button("خروج"){data=Item();dismiss()}}}.task(id:phase){guard phase == .active else{data=Item();return};while !Task.isCancelled{do{data=Item(try await api.rpc("platform_action",["action":"maintenance_open","data":["id":family.id,"request":request.id]])as? [String:Any] ?? [:]);error="";try await Task.sleep(nanoseconds:15_000_000_000)}catch{data=Item();if !Task.isCancelled{self.error=api.errorText(error)};break}}}.privacySensitive()
     }
 }

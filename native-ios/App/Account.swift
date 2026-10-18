@@ -66,13 +66,49 @@ struct MoreScreen:View {@EnvironmentObject private var api:Backend;@State privat
 struct FamilyTreeScreen:View {
     @EnvironmentObject private var api:Backend
     @State private var links:[Item]=[]
+    @State private var known:[Item]=[]
+    @State private var pending:[Item]=[]
     @State private var similar:[Item]=[]
     @State private var options:[Item]=[]
+    @State private var matches:[Item]=[]
+    @State private var term=""
     @State private var relation:[String:String]=[:]
     @State private var error=""
     var levels:[Int]{Array(Set([0]+links.map{$0.number("generation")})).sorted()}
-    func load()async{do{links=Item.items(try await api.action("family_action","tree"));similar=Item.items(try await api.action("family_action","similar"));options=try await api.table("kinship_options",[q("select","*"),q("enabled","eq.true"),q("order","generation,label")]);error=""}catch{self.error=api.errorText(error)}}
-    var body:some View{ScrollView{VStack(spacing:22){Text("القرابة حسب تأكيدك الشخصي. تشابه الأسماء اقتراح ولا يثبت النسب.").font(.footnote).foregroundStyle(.secondary);LoadError(text:error);ForEach(levels,id:\.self){level in VStack(spacing:10){if level != levels.first{Image(systemName:"arrow.down").foregroundStyle(brandBlue)};Text(level<0 ? "الجيل الأعلى \(-level)":level>0 ? "الجيل التالي \(level)":"جيلي").font(.caption).foregroundStyle(.secondary);if level==0{Text(api.profile.text("display_name")+" (أنا)").font(.headline).padding().background(brandBlue.opacity(0.1),in:RoundedRectangle(cornerRadius:14))};ForEach(links.filter{$0.number("generation")==level}){p in VStack{Text(p.text("display_name")).font(.subheadline.bold());Text(p.text("label")).font(.caption).foregroundStyle(brandPink);TaskButton(title:"إزالة العلاقة",symbol:"minus.circle"){_ = try await api.action("family_action","unlink",["member":p.id]);await load()}.font(.caption)}.padding().frame(maxWidth:.infinity).background(Color(.secondarySystemBackground),in:RoundedRectangle(cornerRadius:14))}}};Text("أسماء مشابهة · 70٪ أو أكثر").font(.title3.bold());ForEach(similar){p in VStack(alignment:.leading,spacing:10){Text(p.text("display_name")).font(.headline);Text("نسبة التشابه: \(p.number("score"))٪").font(.caption);Picker("صلة القرابة",selection:Binding(get:{relation[p.id] ?? ""},set:{relation[p.id]=$0})){Text("اختر").tag("");ForEach(options,id:\.rawCode){o in Text(o.text("label")).tag(o.text("code"))}};TaskButton(title:"تأكيد وإضافة إلى شجرتي",symbol:"person.badge.plus"){guard let r=relation[p.id],!r.isEmpty else{throw FamilyError(text:"حدد صلة القرابة.")};_ = try await api.action("family_action","link",["member":p.id,"relation":r]);await load()}}.padding().background(Color(.secondarySystemBackground),in:RoundedRectangle(cornerRadius:14))}}.padding()}.scrollIndicators(.hidden).navigationTitle("شجرة عائلتي").task{await load()}}
+    func load()async{do{links=Item.items(try await api.action("family_action","tree"));known=Item.items(try await api.action("family_action","trusted"));pending=Item.items(try await api.action("family_action","kinship_requests"));similar=Item.items(try await api.action("family_action","similar"));options=try await api.table("kinship_options",[q("select","*"),q("enabled","eq.true"),q("order","generation,label")]);error=""}catch{self.error=api.errorText(error)}}
+    var generations:some View {
+        ForEach(levels,id:\.self){level in
+            VStack(spacing:14){
+                if level != levels.first{Rectangle().fill(brandBlue.opacity(0.35)).frame(width:2,height:22)}
+                Text(level<0 ? "الأصول · الجيل \(-level)":level>0 ? "الفروع · الجيل \(level)":"العائلة · جيلي").font(.caption.bold()).foregroundStyle(brandBlue)
+                LazyVGrid(columns:[GridItem(.adaptive(minimum:145),spacing:12)],spacing:12){
+                    if level==0{FamilyPersonCard(person:api.profile,label:"أنا",canChat:false).overlay(RoundedRectangle(cornerRadius:22).stroke(brandBlue,lineWidth:2))}
+                    ForEach(links.filter{$0.number("generation")==level}){p in
+                        VStack(spacing:8){FamilyPersonCard(person:p,label:p.text("label"),canChat:p.flag("can_chat"));Text(p.flag("confirmed") ? "✓ قرابة مؤكدة":"بانتظار التأكيد").font(.caption2).foregroundStyle(p.flag("confirmed") ? .green:.secondary);TaskButton(title:"إزالة العلاقة",symbol:"minus.circle"){_ = try await api.action("family_action","unlink",["member":p.id]);await load()}.font(.caption).disabled(api.readOnly)}
+                    }
+                }
+            }
+        }
+    }
+    var requests:some View {
+        VStack(alignment:.leading,spacing:12){Text("طلبات تأكيد القرابة").font(.headline);ForEach(pending){p in VStack(alignment:.leading,spacing:10){Text(p.text("display_name")+" · "+p.text("label"));HStack{TaskButton(title:"تأكيد القرابة",symbol:"checkmark"){_ = try await api.action("family_action","confirm_link",["owner":p.id]);await load()};TaskButton(title:"رفض",symbol:"xmark"){_ = try await api.action("family_action","reject_link",["owner":p.id]);await load()}}.disabled(api.readOnly)}}}
+    }
+    func candidate(_ p:Item)->some View {
+        VStack(alignment:.leading,spacing:10){HStack{Avatar(path:p.text("avatar_path"),name:p.text("display_name"));Text(p.text("display_name")).font(.subheadline.bold())};Picker("صلة القرابة",selection:Binding(get:{relation[p.id] ?? ""},set:{relation[p.id]=$0})){Text("اختر").tag("");ForEach(options,id:\.rawCode){o in Text(o.text("label")).tag(o.text("code"))}};TaskButton(title:"إضافة وطلب تأكيد",symbol:"person.badge.plus"){guard let selected=relation[p.id],!selected.isEmpty else{throw FamilyError(text:"حدد صلة القرابة")};_ = try await api.action("family_action","link",["member":p.id,"relation":selected]);await load()}.disabled(api.readOnly)}.padding().background(Color(.secondarySystemBackground),in:RoundedRectangle(cornerRadius:18))
+    }
+    var body:some View {
+        ScrollView{VStack(spacing:24){Text("أجيال تجمعنا · استثناء التواصل يتطلب تعريفًا مقبولًا أو تأكيد القرابة. تشابه الأسماء وحده ليس إثباتًا.").font(.footnote).foregroundStyle(.secondary);LoadError(text:error);generations;Text("الأعضاء الذين عرّفتهم أو عرّفوك").font(.headline);LazyVGrid(columns:[GridItem(.adaptive(minimum:145))]){ForEach(known){p in FamilyPersonCard(person:p,label:"تعريف مقبول",canChat:p.flag("can_chat"))}};requests;TextField("ابحث عن قريب بالاسم أو رقم الجوال",text:$term).textFieldStyle(.roundedBorder).task(id:term){do{try await Task.sleep(nanoseconds:220_000_000);let found=Item.items(try await api.action("family_action","find_relative",["term":term]));try Task.checkCancellation();matches=found}catch{}};ForEach(matches){p in candidate(p)};Text("اقتراحات الأسماء · ٧٠٪ أو أكثر").font(.headline);ForEach(similar){p in candidate(p)}}.padding()}.background(Color(.systemGroupedBackground)).navigationTitle("شجرة عائلتي").task{await load()}
+    }
+}
+struct FamilyPersonCard:View {
+    @EnvironmentObject private var api:Backend
+    let person:Item
+    let label:String
+    let canChat:Bool
+    @State private var room:Room?
+    var body:some View {
+        VStack(spacing:10){NavigationLink{MemberScreen(member:person.id)}label:{VStack(spacing:8){Avatar(path:person.text("avatar_path"),name:person.text("display_name"),size:60);Text(person.text("display_name")).font(.subheadline.bold()).multilineTextAlignment(.center)}}.buttonStyle(.plain);Text(label).font(.caption).foregroundStyle(brandBlue);if canChat{TaskButton(title:"خاص",symbol:"bubble.left.and.bubble.right"){guard let thread=try await api.rpc("chat_open",["other":person.id])as? String else{throw FamilyError(text:"الدردشة غير متاحة")};room=Room(id:thread,title:person.text("display_name"),thread:thread,avatar:person.text("avatar_path"),peer:person.id)}.buttonStyle(.bordered)}}.padding(16).frame(maxWidth:.infinity).background(Color(.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:22)).fullScreenCover(item:$room){r in NavigationStack{ChatRoom(room:r).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){room=nil}}}}}
+    }
 }
 struct EndorsementsScreen:View {
     @EnvironmentObject private var api:Backend
