@@ -10,7 +10,6 @@ declare t family_private.tenants;j family_private.tenant_deletions;r record;tid 
  insert into family_private.lifecycle_mail(tenant_id,expiry,kind,recipient,subject,body)values(t.id,t.subscription_ends_at,'renewal',t.contact_email,'تجديد اشتراك '||t.name||' قبل الحذف النهائي','انتهت مهلة الاطلاع البالغة ستة أشهر بعد انتهاء الاشتراك. يرجى التجديد. بعد 15 يومًا من إرسال هذه الرسالة سيحذف الكيان وكل صوره وبياناته نهائيًا. الكود: '||t.code||'. رابط الإدارة: https://family-news-app.nimbletide.chatgpt.site')on conflict do nothing;
  end loop;
  for t in select * from family_private.tenants where deleting_at is null and payment_status<>'waived'and((payment_status<>'paid'and trial_ends_at+interval '30 days'<=now())or(payment_status='paid'and subscription_ends_at<=now()and renewal_notice_sent_at+interval '15 days'<=now()))for update skip locked loop
- if exists(select 1 from public.profiles p join family_private.platform_admins a on a.user_id=p.id where p.tenant_id=t.id)then continue;end if;
  update family_private.tenants set deleting_at=now(),login_access='blocked'where id=t.id;
  insert into family_private.tenant_deletions(tenant_id,members)select t.id,coalesce(array_agg(p.id),'{}'::uuid[])from public.profiles p where tenant_id=t.id;
  end loop;
@@ -26,7 +25,9 @@ declare t family_private.tenants;j family_private.tenant_deletions;r record;tid 
  select * into j from family_private.tenant_deletions where tenant_id=tid for update;
  if t.deleting_at is null or j.tenant_id is null or t.payment_status='waived'then raise exception 'Deletion not authorized';end if;
  if action='files'then return coalesce((select jsonb_agg(to_jsonb(x))from(select o.bucket_id,o.name from storage.objects o where split_part(o.name,'/',1)=any(select unnest(j.members)::text)order by o.bucket_id,o.name limit 500)x),'[]');
+ elsif action='auth_members'then return to_jsonb(array(select member from unnest(j.members)member where not exists(select 1 from family_private.platform_admins a where a.user_id=member)));
  elsif action='purge_data'then
+ if(select count(*)from information_schema.columns where column_name='tenant_id'and table_schema in('public','family_private'))<>28 then raise exception 'Tenant table registry changed; update cleanup before deletion';end if;
  if exists(select 1 from storage.objects o where split_part(o.name,'/',1)=any(select unnest(j.members)::text))then raise exception 'Files remain';end if;
  -- Dependency order is explicit; a new tenant table stops cleanup instead of leaking data.
  for r in select unnest(array['family_private.push_jobs','family_private.notification_reads','family_private.push_subscriptions','public.ad_preferences','public.likes','public.comments','family_private.chat_messages','family_private.group_members','family_private.chat_groups','family_private.chat_threads','family_private.endorsements','family_private.personal_kinship','family_private.phone_requests','public.announcements','public.posts','family_private.member_details','family_private.manual_members','family_private.maintenance_requests','family_private.subscription_renewals','family_private.billing_invoices','family_private.admin_audit','public.profiles','public.allowed_families','public.kinship_options','public.family_settings','family_private.storage_limits','family_private.lifecycle_mail'])as tbl loop
@@ -34,7 +35,7 @@ declare t family_private.tenants;j family_private.tenant_deletions;r record;tid 
  update family_private.tenant_deletions set phase='auth'where tenant_id=tid;return to_jsonb(j.members);
  elsif action='finish'then
  if j.phase<>'auth'then raise exception 'Invalid phase';end if;
- if exists(select 1 from auth.users where id=any(j.members))then raise exception 'Auth users remain';end if;
+ if exists(select 1 from auth.users where id=any(j.members)and not exists(select 1 from family_private.platform_admins a where a.user_id=auth.users.id))then raise exception 'Auth users remain';end if;
  delete from family_private.tenant_deletions where tenant_id=tid;delete from family_private.tenants where id=tid;return 'true';
  elsif action='error'then update family_private.tenant_deletions set last_error=left(data->>'error',200)where tenant_id=tid;return 'true';
  end if;raise exception 'Unknown action';

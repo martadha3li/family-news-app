@@ -71,7 +71,6 @@ struct LoginScreen:View {
     @State private var relationship="father"
     @State private var sponsor=""
     @State private var sent=false
-    @State private var resultMessage=""
     @State private var recoverySent=false
     @State private var kinship:[Item]=[]
     @FocusState private var field:Int?
@@ -94,7 +93,7 @@ struct HomeScreen:View {
         if api.active{Color.clear.tabItem{Label("الدردشات",systemImage:"bubble.left.and.bubble.right")}.tag(1)}
         NavigationStack{ProfileScreen()}.tabItem{Label("حسابي",systemImage:"person.crop.circle")}.tag(2)
         NavigationStack{MoreScreen()}.tabItem{Label("المزيد",systemImage:"line.3.horizontal")}.tag(3)
-    }.safeAreaInset(edge:.top){if api.readOnly{Text("انتهى الاشتراك · للاطلاع فقط").font(.footnote).padding(8).frame(maxWidth:.infinity).background(Color.orange.opacity(0.15))}}.task(id:api.active){
+    }.safeAreaInset(edge:.top){if api.readOnly || api.family.flag("trial"){Text(lifecycleDescription(api.family)).font(.footnote).padding(8).frame(maxWidth:.infinity).background(Color.orange.opacity(0.15))}}.task(id:api.active){
         guard api.active,!api.readOnly,!checkedCampaign else{return};checkedCampaign=true
         let owner=api.user.id
         do{
@@ -220,11 +219,22 @@ struct TenantRequestScreen:View {
     @State private var photo:PhotosPickerItem?
     @State private var logo:UIImage?
     @State private var sent=false
+    @State private var resultMessage=""
     @State private var error=""
-    var body:some View{Form{Section("طلب كيان عائلي"){TextField("اسم العائلة",text:$name);TextField("رقم التواصل",text:$phoneText).keyboardType(.phonePad);TextField("البريد الإلكتروني",text:$email).keyboardType(.emailAddress).textInputAutocapitalization(.never);PhotosPicker(selection:$photo,matching:.images){Label("شعار العائلة",systemImage:"photo")};if let image=logo{Image(uiImage:image).resizable().scaledToFit().frame(height:140)};LoadError(text:error);Text("تجربة مجانية لمدة 30 يومًا دون انتظار تفعيل. بعد انتهائها يتوقف الإضافة والدردشة، وبعد 30 يومًا إضافية دون اشتراك يحذف الكيان وصوره وبياناته نهائيًا. أكّد بريدك لتصبح المدير.").font(.footnote)};TaskButton(title:"إرسال الطلب",symbol:"paperplane"){
-        guard let image=logo else{throw FamilyError(text:"اختر شعار العائلة")};let scale=min(1,512/max(image.size.width,image.size.height));let size=CGSize(width:image.size.width*scale,height:image.size.height*scale);let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true;let rendered=UIGraphicsImageRenderer(size:size,format:format).image{ctx in UIColor.white.setFill();ctx.fill(CGRect(origin:.zero,size:size));image.draw(in:CGRect(origin:.zero,size:size))};guard let data=rendered.jpegData(compressionQuality:0.72),data.count<=200000 else{throw FamilyError(text:"اختر شعارًا أصغر")}
-        resultMessage = (try await api.request("/rest/v1/rpc/tenant_request",method:"POST",body:["data":["name":name,"phone":try phone(phoneText),"email":email,"logo":"data:image/jpeg;base64,"+data.base64EncodedString()]],auth:false)) as? String ?? "تم إنشاء التجربة المجانية";sent=true
-    }}.navigationTitle("تسجيل عائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.onChange(of:photo){_,item in Task{do{guard let data=try await item?.loadTransferable(type:Data.self),data.count<=20*1024*1024,let image=UIImage(data:data)else{throw FamilyError(text:"اختر صورة صالحة أقل من 20 ميجابايت")};logo=image;error=""}catch{self.error=api.errorText(error)}}}.alert("تم استلام الطلب",isPresented:$sent){Button("حسنًا"){dismiss()}}message:{Text(resultMessage)}}
+    func submit()async throws {
+        guard let image=logo else{throw FamilyError(text:"اختر شعار العائلة")}
+        let scale=min(1,512/max(image.size.width,image.size.height))
+        let size=CGSize(width:image.size.width*scale,height:image.size.height*scale)
+        let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true
+        let rendered=UIGraphicsImageRenderer(size:size,format:format).image{ctx in UIColor.white.setFill();ctx.fill(CGRect(origin:.zero,size:size));image.draw(in:CGRect(origin:.zero,size:size))}
+        guard let bytes=rendered.jpegData(compressionQuality:0.72),bytes.count<=200000 else{throw FamilyError(text:"اختر شعارًا أصغر")}
+        let data:[String:Any]=["name":name,"phone":try phone(phoneText),"email":email,"logo":"data:image/jpeg;base64,"+bytes.base64EncodedString()]
+        let result=try await api.request("/rest/v1/rpc/tenant_request",method:"POST",body:["data":data],auth:false)
+        resultMessage=result as? String ?? "تم إنشاء التجربة المجانية";sent=true
+    }
+    func loadPhoto(_ item:PhotosPickerItem?)async{do{guard let data=try await item?.loadTransferable(type:Data.self),data.count<=20*1024*1024,let image=UIImage(data:data)else{throw FamilyError(text:"اختر صورة صالحة أقل من 20 ميجابايت")};logo=image;error=""}catch{self.error=api.errorText(error)}}
+    var fields:some View{Section("كيان عائلي جديد"){TextField("اسم العائلة",text:$name);TextField("رقم التواصل",text:$phoneText).keyboardType(.phonePad);TextField("البريد الإلكتروني",text:$email).keyboardType(.emailAddress).textInputAutocapitalization(.never);PhotosPicker(selection:$photo,matching:.images){Label("شعار العائلة",systemImage:"photo")};if let image=logo{Image(uiImage:image).resizable().scaledToFit().frame(height:140)};Text("تجربة مجانية لمدة 30 يومًا دون انتظار تفعيل. بعد انتهائها يتوقف الإضافة والدردشة، وبعد 30 يومًا إضافية دون اشتراك يحذف الكيان وصوره وبياناته نهائيًا. أكّد بريدك لتصبح المدير.").font(.footnote)}}
+    var body:some View{Form{fields;LoadError(text:error);TaskButton(title:"بدء التجربة المجانية",symbol:"paperplane"){try await submit()}}.navigationTitle("تسجيل عائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.onChange(of:photo){_,item in Task{await loadPhoto(item)}}.alert("تم إنشاء عائلتك",isPresented:$sent){Button("حسنًا"){dismiss()}}message:{Text(resultMessage)}}
 }
 struct TenantPlatformLogin:View {
     @StateObject private var portal=Backend()
@@ -254,7 +264,7 @@ struct TenantPlatformEditor:View {
     @State private var payment="unpaid"
     @State private var fee="0"
     @State private var notes=""
-    var body:some View{Form{Section("بيانات الكيان"){TextField("اسم العائلة",text:$name);TextField("الكود",text:$code).textInputAutocapitalization(.never);Text(family.text("contact_email"));Text(family.text("contact_phone"))};Section("السداد والتفعيل"){Picker("السداد",selection:$payment){Text("غير مسدد").tag("unpaid");Text("مسدد").tag("paid");Text("معفى").tag("waived")};Picker("الحالة",selection:$status){Text("بانتظار التفعيل").tag("pending");Text("مفعّل").tag("active");Text("موقوف").tag("suspended");Text("مرفوض").tag("rejected")};TextField("ملاحظات الإدارة",text:$notes,axis:.vertical)};Section("الاشتراك"){NavigationLink("فترة الاشتراك والتجديد"){TenantPlanScreen(family:family)};NavigationLink("الاستهلاك والدخول والصيانة"){TenantOperationsScreen(family:family)}};TaskButton(title:"حفظ التغييرات",symbol:"checkmark"){guard let amount=Double(fee),amount>=0 else{throw FamilyError(text:"تحقق من الرسوم")};_ = try await api.rpc("platform_action",["action":"save","data":["id":family.id,"name":name,"code":code,"status":status,"payment_status":payment,"fee_sar":amount,"notes":notes]]);await saved();dismiss()}}.navigationTitle("إدارة الكيان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onAppear{name=family.text("name");code=family.text("code");status=family.text("status");payment=family.text("payment_status");fee=family.text("fee_sar");notes=family.text("notes")}}
+    var body:some View{Form{Section("بيانات الكيان"){TextField("اسم العائلة",text:$name);TextField("الكود",text:$code).textInputAutocapitalization(.never);Text(family.text("contact_email"));Text(family.text("contact_phone"))};Section("السداد والتفعيل"){Picker("السداد",selection:$payment){Text("غير مسدد").tag("unpaid");Text("مسدد").tag("paid");Text("معفى").tag("waived")};Picker("الحالة",selection:$status){Text("بانتظار التفعيل").tag("pending");Text("مفعّل").tag("active");Text("موقوف").tag("suspended");Text("مرفوض").tag("rejected")};TextField("ملاحظات الإدارة",text:$notes,axis:.vertical)};Section("الاشتراك"){Text(lifecycleDescription(family));if family.text("payment_status")=="unpaid" && family.text("trial_started_at").isEmpty && family.text("subscription_ends_at").isEmpty{NavigationLink("منح تجربة مجانية 30 يومًا"){PlatformTrialScreen(family:family)}};NavigationLink("فترة الاشتراك والتجديد"){TenantPlanScreen(family:family)};NavigationLink("الاستهلاك والدخول والصيانة"){TenantOperationsScreen(family:family)}};TaskButton(title:"حفظ التغييرات",symbol:"checkmark"){guard let amount=Double(fee),amount>=0 else{throw FamilyError(text:"تحقق من الرسوم")};_ = try await api.rpc("platform_action",["action":"save","data":["id":family.id,"name":name,"code":code,"status":status,"payment_status":payment,"fee_sar":amount,"notes":notes]]);await saved();dismiss()}}.navigationTitle("إدارة الكيان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onAppear{name=family.text("name");code=family.text("code");status=family.text("status");payment=family.text("payment_status");fee=family.text("fee_sar");notes=family.text("notes")}}
 }
 
 let subscriptionPlans:[(String,String)]=[("12","سنة"),("24","سنتان"),("36","٣ سنوات"),("6","٦ أشهر")]
@@ -460,7 +470,7 @@ func invoiceShareURL(_ i:Item,whatsapp:Bool)->URL? {
     return URL(string:"mailto:"+safe+"?subject="+("مطالبة اشتراك "+i.text("number")).addingPercentEncoding(withAllowedCharacters:.alphanumerics)!+"&body="+text)
 }
 struct PlatformDashboard:View {
-    var body:some View{List{Section("إدارة المنصة المستقلة"){NavigationLink("الكيانات العائلية"){TenantPlatformList()};NavigationLink("الباقات والاشتراكات"){BillingPlansScreen()};NavigationLink("الفواتير ومطالبات السداد"){BillingInvoicesScreen(tenant:nil)}}}.navigationTitle("إدارة المنصة")}
+    var body:some View{List{Section("إدارة المنصة المستقلة"){NavigationLink("الكيانات العائلية"){TenantPlatformList()};NavigationLink("الباقات والاشتراكات"){BillingPlansScreen()};NavigationLink("الفواتير ومطالبات السداد"){BillingInvoicesScreen(tenant:nil)};NavigationLink("المهل والبريد والحذف التلقائي"){PlatformLifecycleScreen()}}}.navigationTitle("إدارة المنصة")}
 }
 struct BillingPlansScreen:View {
     @EnvironmentObject private var api:Backend
@@ -514,4 +524,18 @@ struct InvoiceNativeCard:View {
     @State private var confirm=false
     @State private var error=""
     var body:some View{VStack(alignment:.leading,spacing:12){Text("مطالبة #"+invoice.text("number")).font(.headline);Text(invoice.text("tenant_name")+" · "+invoice.text("plan_name"));Text(invoice.text("amount_sar")+" ر.س").bold();Text(invoice.text("status")=="paid" ? "مسددة":invoice.text("status")=="void" ? "ملغاة":"بانتظار السداد");Text("مطالبة غير ضريبية. المشاركة تفتح رسالة جاهزة ولا تعني إرسالها.").font(.caption).foregroundStyle(.secondary);if let email=invoiceShareURL(invoice,whatsapp:false){Link("مشاركة بالبريد",destination:email)};if let wa=invoiceShareURL(invoice,whatsapp:true){Link("مشاركة بواتساب",destination:wa)};ShareLink(item:invoiceMessage(invoice)){Label("مشاركة المطالبة",systemImage:"square.and.arrow.up")};if invoice.text("status")=="issued"{Button("تسجيل استلام السداد وتجديد الاشتراك"){confirm=true}};LoadError(text:error)}.padding(.vertical,10).confirmationDialog("هل استلمت السداد فعليًا؟",isPresented:$confirm,titleVisibility:.visible){Button("تأكيد السداد والتجديد"){Task{do{_ = try await api.rpc("platform_action",["action":"invoice_paid","data":["invoice":invoice.id,"confirm":"MANUAL_PAYMENT_RECEIVED"]]);await changed()}catch{self.error=api.errorText(error)}}}}message:{Text(invoice.text("amount_sar")+" ر.س. لا يوجد سحب أو تحصيل إلكتروني مفعّل.")}}
+}
+
+struct PlatformLifecycleScreen:View {
+ @EnvironmentObject private var api:Backend
+ @State private var data=Item()
+ @State private var error=""
+ func load()async{do{data=Item(try await api.action("platform_lifecycle","status")as? [String:Any] ?? [:]);error=""}catch{self.error=api.errorText(error)}}
+ var body:some View{List{LoadError(text:error);Text(data.flag("schedule_active") ? "الفحص التلقائي يعمل كل ساعة":"الفحص التلقائي غير مفعل");Text("رسائل بانتظار الإرسال: \(data.number("pending_mail"))");Text("لا يبدأ حذف الاشتراك المنتهي حتى يرسل بريد التجديد بنجاح ثم تمر 15 يومًا.").font(.footnote);ForEach(data.rows("mail_errors").indices,id:\.self){i in let m=data.rows("mail_errors")[i];Text(m.text("family")+" · "+m.text("error")).font(.caption)};ForEach(data.rows("deletions").indices,id:\.self){i in let j=data.rows("deletions")[i];Text(j.text("family")+" · "+j.text("phase")+" · "+j.text("last_error"))}}.navigationTitle("المهل والبريد والحذف").task{await load()}.refreshable{await load()}}
+}
+struct PlatformTrialScreen:View {
+ @EnvironmentObject private var api:Backend
+ let family:Item
+ @State private var done=false
+ var body:some View{Form{Text(family.text("name")).font(.headline);Text("تجربة مجانية 30 يومًا ثم 30 يومًا للاطلاع. دون اشتراك يحذف الكيان وكل صوره وبياناته نهائيًا.");TaskButton(title:"منح التجربة المجانية",symbol:"calendar.badge.plus"){_ = try await api.action("platform_lifecycle","trial_start",["id":family.id]);done=true}.disabled(done);if done{Text("بدأت التجربة المجانية")}}.navigationTitle("تجربة مجانية")}
 }
