@@ -1,0 +1,32 @@
+begin;
+create temp table subscription_test(tid uuid,rid uuid,owner uuid);
+insert into subscription_test select gen_random_uuid(),gen_random_uuid(),user_id from family_private.platform_admins limit 1;
+grant select on subscription_test to authenticated;
+insert into family_private.tenants(id,code,name,contact_phone,contact_email)select tid,'SUB-TEST','اختبار اشتراك','+966500000000','test@example.invalid'from subscription_test;
+select set_config('request.jwt.claim.sub',(select owner::text from subscription_test),true);
+set local role authenticated;
+do $$declare id uuid:=(select tid from subscription_test);rid uuid:=(select subscription_test.rid from subscription_test);r jsonb;s jsonb;begin
+ perform public.platform_action('subscription_save',jsonb_build_object('id',id,'subscription_starts_at','2027-01-31T10:00:00+03:00','subscription_ends_at','2028-01-31T10:00:00+03:00','renewal_prices','{"6":60,"12":100,"24":180,"36":250}'::jsonb));
+ select x into s from jsonb_array_elements(public.platform_action('list'))x where x->>'id'=id::text;
+ if s->'renewal_prices'->>'12'<>'100'then raise exception 'prices not saved';end if;
+ r=public.platform_action('renew',jsonb_build_object('id',id,'months',6,'request_id',rid,'payment_status','paid'));
+ if(r->>'ends_at')::timestamptz<>'2028-07-31T10:00:00+03:00'::timestamptz or(r->>'amount_sar')::numeric<>60 then raise exception 'extension or price wrong';end if;
+ if public.platform_action('renew',jsonb_build_object('id',id,'months',6,'request_id',rid,'payment_status','paid'))<>r then raise exception 'duplicate renewal';end if;
+ begin perform public.platform_action('subscription_save',jsonb_build_object('id',id,'subscription_starts_at','2027-01-31','subscription_ends_at','2026-01-31'));raise exception 'INVALID_DATE_ALLOWED';exception when raise_exception then if sqlerrm='INVALID_DATE_ALLOWED'then raise;end if;end;
+ begin perform public.platform_action('subscription_save',jsonb_build_object('id',id,'renewal_prices','{"12":-1}'::jsonb));raise exception 'NEGATIVE_ALLOWED';exception when raise_exception then if sqlerrm='NEGATIVE_ALLOWED'then raise;end if;end;
+ begin perform public.platform_action('renew',jsonb_build_object('id',id,'months',5,'request_id',gen_random_uuid(),'payment_status','paid'));raise exception 'UNKNOWN_PLAN';exception when raise_exception then if sqlerrm='UNKNOWN_PLAN'then raise;end if;end;
+ perform public.platform_action('subscription_save',jsonb_build_object('id',id,'subscription_starts_at','2020-01-01','subscription_ends_at','2021-01-01','renewal_prices','{"12":100}'::jsonb));
+ r=public.platform_action('renew',jsonb_build_object('id',id,'months',12,'request_id',gen_random_uuid(),'payment_status','waived'));
+ if(r->>'starts_at')::timestamptz<>date_trunc('minute',now())or(r->>'amount_sar')::numeric<>0 then raise exception 'expired renewal wrong';end if;
+ begin perform public.platform_action('renew',jsonb_build_object('id',id,'months',24,'request_id',gen_random_uuid(),'payment_status','paid'));raise exception 'UNPRICED_ALLOWED';exception when raise_exception then if sqlerrm='UNPRICED_ALLOWED'then raise;end if;end;
+end$$;
+reset role;
+select set_config('request.jwt.claim.sub',gen_random_uuid()::text,true);
+set local role authenticated;
+do $$begin
+ begin perform public.platform_action('renew','{}');raise exception 'NONADMIN_ALLOWED';exception when raise_exception then if sqlerrm='NONADMIN_ALLOWED'then raise;end if;end;
+ begin perform count(*)from family_private.subscription_renewals;raise exception 'AUDIT_LEAK';exception when insufficient_privilege then null;end;
+end$$;
+reset role;
+select 'PASS: admin dates/prices, calendar extension, replay protection, expired restart, waiver, invalid inputs, unpriced plans, member and audit isolation' result;
+rollback;

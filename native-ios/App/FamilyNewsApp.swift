@@ -240,7 +240,7 @@ struct TenantPlatformList:View {
     @State private var error=""
     @State private var edit:Item?
     func load()async{do{tenants=Item.items(try await api.rpc("platform_action",["action":"list"]));error=""}catch{self.error=api.errorText(error)}}
-    var body:some View{List{Section{Text("تسجيل الرسوم والسداد يدويًا، ثم تفعيل الكيان. لا توجد بوابة دفع مفعّلة.").font(.footnote)};LoadError(text:error);ForEach(tenants){family in Button{edit=family}label:{VStack(alignment:.leading,spacing:7){Text(family.text("name")).font(.headline);Text("الكود "+family.text("code")+" · "+family.text("status")).font(.caption);Text("\(family.number("members")) عضو · \(family.number("posts")) خبر").font(.caption)}}}}.navigationTitle("الكيانات العائلية").task{await load()}.refreshable{await load()}.sheet(item:$edit){family in NavigationStack{TenantPlatformEditor(family:family){await load()}}}}
+    var body:some View{List{Section{Text("تسجيل الرسوم والسداد يدويًا، ثم تفعيل الكيان. لا توجد بوابة دفع مفعّلة.").font(.footnote)};LoadError(text:error);ForEach(tenants){family in Button{edit=family}label:{VStack(alignment:.leading,spacing:7){Text(family.text("name")).font(.headline);Text("الكود "+family.text("code")+" · "+family.text("status")).font(.caption);Text("\(family.number("members")) عضو · \(family.number("posts")) خبر").font(.caption);Text(subscriptionSummary(family)).font(.caption).foregroundStyle(.secondary)}}}}.navigationTitle("الكيانات العائلية").task{await load()}.refreshable{await load()}.sheet(item:$edit){family in NavigationStack{TenantPlatformEditor(family:family){await load()}}}}
 }
 struct TenantPlatformEditor:View {
     @EnvironmentObject private var api:Backend
@@ -253,5 +253,56 @@ struct TenantPlatformEditor:View {
     @State private var payment="unpaid"
     @State private var fee="0"
     @State private var notes=""
-    var body:some View{Form{Section("بيانات الكيان"){TextField("اسم العائلة",text:$name);TextField("الكود",text:$code).textInputAutocapitalization(.never);Text(family.text("contact_email"));Text(family.text("contact_phone"))};Section("السداد والتفعيل"){TextField("الرسوم بالريال",text:$fee).keyboardType(.decimalPad);Picker("السداد",selection:$payment){Text("غير مسدد").tag("unpaid");Text("مسدد").tag("paid");Text("معفى").tag("waived")};Picker("الحالة",selection:$status){Text("بانتظار التفعيل").tag("pending");Text("مفعّل").tag("active");Text("موقوف").tag("suspended");Text("مرفوض").tag("rejected")};TextField("ملاحظات الإدارة",text:$notes,axis:.vertical)};TaskButton(title:"حفظ التغييرات",symbol:"checkmark"){guard let amount=Double(fee),amount>=0 else{throw FamilyError(text:"تحقق من الرسوم")};_ = try await api.rpc("platform_action",["action":"save","data":["id":family.id,"name":name,"code":code,"status":status,"payment_status":payment,"fee_sar":amount,"notes":notes]]);await saved();dismiss()}}.navigationTitle("إدارة الكيان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onAppear{name=family.text("name");code=family.text("code");status=family.text("status");payment=family.text("payment_status");fee=family.text("fee_sar");notes=family.text("notes")}}
+    var body:some View{Form{Section("بيانات الكيان"){TextField("اسم العائلة",text:$name);TextField("الكود",text:$code).textInputAutocapitalization(.never);Text(family.text("contact_email"));Text(family.text("contact_phone"))};Section("السداد والتفعيل"){TextField("الرسوم بالريال",text:$fee).keyboardType(.decimalPad);Picker("السداد",selection:$payment){Text("غير مسدد").tag("unpaid");Text("مسدد").tag("paid");Text("معفى").tag("waived")};Picker("الحالة",selection:$status){Text("بانتظار التفعيل").tag("pending");Text("مفعّل").tag("active");Text("موقوف").tag("suspended");Text("مرفوض").tag("rejected")};TextField("ملاحظات الإدارة",text:$notes,axis:.vertical)};Section("الاشتراك"){NavigationLink("فترة الاشتراك والتجديد"){TenantSubscriptionEditor(family:family,saved:saved)}};TaskButton(title:"حفظ التغييرات",symbol:"checkmark"){guard let amount=Double(fee),amount>=0 else{throw FamilyError(text:"تحقق من الرسوم")};_ = try await api.rpc("platform_action",["action":"save","data":["id":family.id,"name":name,"code":code,"status":status,"payment_status":payment,"fee_sar":amount,"notes":notes]]);await saved();dismiss()}}.navigationTitle("إدارة الكيان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onAppear{name=family.text("name");code=family.text("code");status=family.text("status");payment=family.text("payment_status");fee=family.text("fee_sar");notes=family.text("notes")}}
+}
+
+let subscriptionPlans:[(String,String)]=[("12","سنة"),("24","سنتان"),("36","٣ سنوات"),("6","٦ أشهر")]
+func subscriptionDuration(_ start:Date,_ end:Date)->String {
+    guard end>start else{return "انتهى الاشتراك"}
+    var cal=Calendar(identifier:.gregorian);cal.timeZone=TimeZone(identifier:"Asia/Riyadh")!
+    var months=(cal.component(.year,from:end)-cal.component(.year,from:start))*12+cal.component(.month,from:end)-cal.component(.month,from:start)
+    while cal.date(byAdding:.month,value:months,to:start)!>end{months -= 1}
+    let cursor=cal.date(byAdding:.month,value:months,to:start)!
+    let c=cal.dateComponents([.day,.hour,.minute],from:cursor,to:end)
+    let days=c.day ?? 0
+    let parts:[(Int,String)]=[(months/12,"سنة"),(months%12,"شهر"),(days/7,"أسبوع"),(days%7,"يوم"),(c.hour ?? 0,"ساعة"),(c.minute ?? 0,"دقيقة")]
+    let text=parts.filter{$0.0>0}.map{String($0.0)+" "+$0.1}.joined(separator:" و ")
+    return text.isEmpty ? "أقل من دقيقة":text
+}
+func subscriptionSummary(_ family:Item,now:Date=Date())->String {
+    guard !family.text("subscription_ends_at").isEmpty else{return "لم تحدد فترة اشتراك"}
+    let start=dateValue(family.text("subscription_starts_at")),end=dateValue(family.text("subscription_ends_at"))
+    if now<start{return "يبدأ لاحقًا · "+subscriptionDuration(start,end)}
+    return now>=end ? "انتهى الاشتراك":"المتبقي "+subscriptionDuration(now,end)
+}
+struct TenantSubscriptionEditor:View {
+    @EnvironmentObject private var api:Backend
+    let family:Item
+    let saved:()async->Void
+    @State private var record=Item()
+    @State private var enabled=false
+    @State private var start=Date()
+    @State private var end=Date()
+    @State private var prices:[String:String]=[:]
+    @State private var plan="12"
+    @State private var payment="paid"
+    @State private var confirm=false
+    @State private var requestID=UUID().uuidString
+    @State private var error=""
+    @State private var renewing=false
+    func display(_ item:Item){record=item;enabled = !item.text("subscription_ends_at").isEmpty;start=enabled ? dateValue(item.text("subscription_starts_at")):Date();end=enabled ? dateValue(item.text("subscription_ends_at")):Calendar(identifier:.gregorian).date(byAdding:.year,value:1,to:start)!;for(key,_)in subscriptionPlans{prices[key]=item.child("renewal_prices").text(key)}}
+    func refresh()async throws{let rows=Item.items(try await api.rpc("platform_action",["action":"list"]));if let row=rows.first(where:{$0.id==family.id}){display(row)};await saved()}
+    var priceText:String{record.child("renewal_prices").text(plan)}
+    var body:some View{Form{
+        Section("فترة الاشتراك"){TimelineView(.periodic(from:.now,by:60)){context in Text(subscriptionSummary(record,now:context.date))};Toggle("تحديد فترة الاشتراك",isOn:$enabled);if enabled{DatePicker("من",selection:$start,displayedComponents:[.date,.hourAndMinute]);DatePicker("إلى",selection:$end,displayedComponents:[.date,.hourAndMinute]);Text(subscriptionDuration(start,end)).font(.footnote)};Text("التواريخ بتوقيت الرياض. عرض نهاية الاشتراك لا يوقف الكيان تلقائيًا؛ الإيقاف من حالة الكيان.").font(.footnote).foregroundStyle(.secondary)}
+        Section("أسعار التجديد بالريال"){ForEach(subscriptionPlans,id:\.0){key,label in TextField(label,text:Binding(get:{prices[key] ?? ""},set:{prices[key]=$0})).keyboardType(.decimalPad)};TaskButton(title:"حفظ الفترة والأسعار",symbol:"checkmark"){
+            guard !enabled || end>start else{throw FamilyError(text:"يجب أن تكون النهاية بعد البداية")}
+            var amounts:[String:Double]=[:];for(key,_)in subscriptionPlans{let text=(prices[key] ?? "").trimmingCharacters(in:.whitespaces);if !text.isEmpty{guard let value=Double(text),value.isFinite,value>=0,value<=99999999.99,abs(value*100-(value*100).rounded())<0.00001 else{throw FamilyError(text:"تحقق من أسعار الباقات")};amounts[key]=value}}
+            let f=ISO8601DateFormatter();let data:[String:Any]=["id":family.id,"subscription_starts_at":enabled ? f.string(from:start) as Any:NSNull(),"subscription_ends_at":enabled ? f.string(from:end) as Any:NSNull(),"renewal_prices":amounts]
+            _ = try await api.rpc("platform_action",["action":"subscription_save","data":data]);try await refresh()
+        }}
+        Section("تجديد الاشتراك"){Picker("الباقة",selection:$plan){ForEach(subscriptionPlans,id:\.0){key,label in let price=record.child("renewal_prices").text(key);Text(label+" · "+(price.isEmpty ? "لم يحدد السعر":price+" ر.س")).tag(key)}};Picker("السداد",selection:$payment){Text("تم السداد يدويًا").tag("paid");Text("إعفاء من الرسوم").tag("waived")};Text("التجديد يضاف إلى نهاية الاشتراك الساري، أو يبدأ الآن إذا انتهى. لا يجري تحصيل إلكتروني.").font(.footnote);Button(renewing ? "جاري التجديد…":"تأكيد وتجديد الاشتراك"){confirm=true}.disabled(priceText.isEmpty || renewing);LoadError(text:error)}
+    }.navigationTitle("الاشتراك والتجديد").environment(\.timeZone,TimeZone(identifier:"Asia/Riyadh")!).onAppear{display(family)}.task{do{try await refresh()}catch{self.error=api.errorText(error)}}.confirmationDialog("تأكيد التجديد",isPresented:$confirm,titleVisibility:.visible){Button("تنفيذ التجديد"){
+        renewing=true;Task{defer{renewing=false};do{_ = try await api.rpc("platform_action",["action":"renew","data":["id":family.id,"months":Int(plan) ?? 0,"payment_status":payment,"request_id":requestID]]);requestID=UUID().uuidString;try await refresh();error=""}catch{self.error=api.errorText(error)}}
+    }}message:{Text(family.text("name")+" · "+(subscriptionPlans.first{$0.0==plan}?.1 ?? "")+" · "+(payment=="waived" ? "إعفاء من الرسوم":priceText+" ر.س مسددة يدويًا"))}}
 }

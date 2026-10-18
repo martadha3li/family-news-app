@@ -20,6 +20,7 @@ jobs:
           python3 native-ios/checks/core-checks.py
           python3 native-ios/checks/biometric-checks.py
           python3 native-ios/checks/icon-checks.py
+          python3 native-ios/checks/subscription-checks.py
       - name: Build native device archive
         run: |
           set -o pipefail

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {subscriptionDates,subscriptionDuration,subscriptionStatus,subscriptionInput,subscriptionAdmin} from './dist/subscriptions.mjs';
+assert.equal(subscriptionDuration('2027-01-31T00:00:00+03:00','2027-02-28T00:00:00+03:00'),'1 شهر');
+assert.equal(subscriptionDuration('2028-02-29T00:00:00+03:00','2029-02-28T00:00:00+03:00'),'1 سنة');
+assert.equal(subscriptionDuration('2026-01-01T00:00:00+03:00','2026-01-10T02:03:00+03:00'),'1 أسبوع و 2 يوم و 2 ساعة و 3 دقيقة');
+assert.deepEqual(subscriptionDates('',''),{subscription_starts_at:null,subscription_ends_at:null});
+assert.throws(()=>subscriptionDates('2026-01-02T00:00','2026-01-01T00:00'));
+assert.equal(subscriptionInput(subscriptionDates('2026-01-01T12:34','2027-01-01T12:34').subscription_starts_at),'2026-01-01T12:34');
+assert.equal(subscriptionStatus({subscription_ends_at:'2020-01-01'}),'انتهى الاشتراك');
+const {JSDOM}=await import(process.env.FAMILY_UI_TEST_MODULE||'jsdom');const {window}=new JSDOM('<body></body>');globalThis.document=window.document;window.HTMLDialogElement.prototype.showModal=function(){this.open=true};window.HTMLDialogElement.prototype.close=function(){this.open=false};
+const element=(tag,text,css)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(css)e.className=css;return e},button=(text,fn,css)=>{const b=element('button',text,css);b.type='button';b.onclick=fn;return b};let calls=[],reloads=0;
+const t={id:'test',name:'عائلة اختبار',renewal_prices:{6:60,12:100,24:180,36:250},subscription_starts_at:'2026-01-01T00:00:00+03:00',subscription_ends_at:'2027-01-01T00:00:00+03:00'};
+const box=subscriptionAdmin({t,element,button,busy:async(_,f)=>f(),rpc:async(name,body)=>{calls.push(body)},toast:()=>{},reload:async()=>reloads++});document.body.append(box);const form=box.querySelector('form');assert.equal(form.elements.start.value,'2026-01-01T00:00');form.elements.namedItem('12').value='120';await form.onsubmit({preventDefault(){}});assert.equal(calls[0].data.renewal_prices[12],120);assert.equal(calls[0].action,'subscription_save');
+const select=box.querySelector('.subscription-renew select');select.value='24';box.querySelector('.subscription-renew button').click();assert.equal(calls.length,1);assert.ok(document.querySelector('dialog').textContent.includes('180 ر.س'));await document.querySelector('dialog button').onclick();assert.equal(calls[1].action,'renew');assert.equal(calls[1].data.months,24);assert.match(calls[1].data.request_id,/^[a-f0-9-]{36}$/);assert.equal(reloads,2);
+const empty=subscriptionAdmin({t:{id:'empty'},element,button,busy:async(_,f)=>f(),rpc:async()=>{},toast:()=>{},reload:async()=>{}});assert.equal(empty.querySelector('.subscription-renew button').disabled,true);
+console.log('PASS: Riyadh dates, calendar months/leap years, all duration units, invalid range, saved prices, confirmation before renewal, selected plan and replay ID, unpriced disabled.');
