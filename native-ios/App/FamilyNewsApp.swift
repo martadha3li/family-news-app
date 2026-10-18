@@ -198,12 +198,13 @@ struct TenantSelectionScreen:View {
     @State private var selected:Item?
     @State private var request=false
     @State private var platform=false
+    @State private var showFamilies=true
     var body:some View{NavigationStack{List{
         Section{Brand().frame(maxWidth:.infinity).padding(.vertical,12);Text("اختر عائلتك مرة واحدة. يُحفظ الاختيار على هذا الجهاز، ويمكن تغييره لاحقًا.").font(.subheadline);TextField("كود العائلة أو اسمها",text:$term).textInputAutocapitalization(.never);LoadError(text:error)}
-        Section("العوائل المتاحة"){ForEach(families){family in Button{selected=family}label:{HStack(spacing:12){if let image=tenantLogo(family){Image(uiImage:image).resizable().scaledToFit().frame(width:48,height:48)};VStack(alignment:.leading){Text(family.text("name")).font(.headline);Text("الكود "+family.text("code")).font(.caption)}}}}}
+        Section{DisclosureGroup("العوائل المتاحة",isExpanded:$showFamilies){ForEach(families){family in Button{selected=family}label:{HStack(spacing:12){Group{if let image=tenantLogo(family){Image(uiImage:image).resizable().scaledToFit()}else{Image(family.text("code")=="01" ? "Family01Preview":"PlatformLogo").resizable().scaledToFit()}}.frame(width:48,height:48);VStack(alignment:.leading){Text(family.text("name")).font(.headline);Text("الكود "+family.text("code")).font(.caption)}}}}}}
         Section{Button("تسجيل عائلة جديدة"){request=true};Button("دخول إدارة المنصة"){platform=true}}
     }.navigationTitle("أهلًا بك").task(id:term){do{try await Task.sleep(nanoseconds:220_000_000);let rows=Item.items(try await api.request("/rest/v1/rpc/tenant_directory",method:"POST",body:["term":term],auth:false));try Task.checkCancellation();families=rows;error=""}catch{if !Task.isCancelled{self.error=api.errorText(error)}}}
-    .confirmationDialog(selected?.text("name") ?? "",isPresented:Binding(get:{selected != nil},set:{if !$0{selected=nil}}),titleVisibility:.visible){Button("تأكيد الدخول وحفظ الكيان"){if let family=selected{Task{if api.signedIn{await api.logout()};api.selectFamily(family);selected=nil}}}}message:{Text("ستفتح واجهة هذه العائلة مباشرة في المرات القادمة.")}
+    .confirmationDialog(selected?.text("name") ?? "",isPresented:Binding(get:{selected != nil},set:{if !$0{selected=nil}}),titleVisibility:.visible){Button("تأكيد الدخول وحفظ الكيان"){if let family=selected{Task{if api.signedIn{await api.logout()};api.selectFamily(family);selected=nil}}}}message:{Text("ستفتح واجهة هذه العائلة باسمها وشعارها مباشرة في المرات القادمة. "+(selected?.text("code")=="01" ? "ستتغير أيقونة التطبيق إلى شعار العائلة على الشاشة الرئيسية. يبقى اسم التطبيق العوائل وفق قيود الآيفون.":"تغيير أيقونة الشاشة الرئيسية لهذا الكيان يحتاج تحديثًا يتضمن شعاره. يبقى اسم التطبيق العوائل وفق قيود الآيفون."))}
     .sheet(isPresented:$request){NavigationStack{TenantRequestScreen()}}
     .sheet(isPresented:$platform){TenantPlatformLogin()}
     }}
