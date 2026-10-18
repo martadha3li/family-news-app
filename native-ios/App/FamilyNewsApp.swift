@@ -119,7 +119,7 @@ struct LaunchScreen:View {
     var body:some View {
         ZStack{Color(.systemBackground).ignoresSafeArea();VStack(spacing:28){
             ZStack{Circle().stroke(brandBlue.opacity(0.08),lineWidth:1).frame(width:200,height:200);Circle().trim(from:0,to:0.68).stroke(AngularGradient(colors:[brandBlue,brandPink,brandBlue.opacity(0.1)],center:.center),style:StrokeStyle(lineWidth:3,lineCap:.round)).frame(width:200,height:200).rotationEffect(.degrees(animate && !reduceMotion ? 360:0));Group{if let logo=tenantLogo(api.family){Image(uiImage:logo).resizable().scaledToFit()}else{Image(api.family.text("code")=="01" ? "Family01Preview":"AppIconPreview").resizable().scaledToFit()}}.frame(width:120,height:120).scaleEffect(animate && !reduceMotion ? 1.045:0.96)}
-            Brand();VStack(spacing:10){ProgressView(value:progress).tint(brandBlue).frame(width:180);Text("\(Int(progress*100))٪").font(.system(size:20,weight:.semibold,design:.rounded)).monospacedDigit();Text("جاري تهيئة أخبار العائلة").font(.footnote).foregroundStyle(.secondary)}
+            Brand();VStack(spacing:10){ProgressView(value:progress).tint(brandBlue).frame(width:180);Text("\(Int(progress*100))٪").font(.system(size:20,weight:.semibold,design:.rounded)).monospacedDigit();Text("جاري تهيئة "+(api.family.text("name").isEmpty ? "منصة العوائل":api.family.text("name"))).font(.footnote).foregroundStyle(.secondary)}
         }}.onAppear{withAnimation(.easeInOut(duration:1.6).repeatForever(autoreverses:true)){animate=true}}.animation(.easeInOut(duration:0.2),value:progress)
     }
 }
@@ -199,11 +199,12 @@ struct TenantSelectionScreen:View {
     @State private var request=false
     @State private var platform=false
     @State private var showFamilies=true
+    @State private var loadingDirectory=true
     var body:some View{NavigationStack{List{
         Section{Brand().frame(maxWidth:.infinity).padding(.vertical,12);Text("اختر عائلتك مرة واحدة. يُحفظ الاختيار على هذا الجهاز، ويمكن تغييره لاحقًا.").font(.subheadline);TextField("كود العائلة أو اسمها",text:$term).textInputAutocapitalization(.never);LoadError(text:error)}
         Section{DisclosureGroup("العوائل المتاحة",isExpanded:$showFamilies){ForEach(families){family in Button{selected=family}label:{HStack(spacing:12){Group{if let image=tenantLogo(family){Image(uiImage:image).resizable().scaledToFit()}else{Image(family.text("code")=="01" ? "Family01Preview":"PlatformLogo").resizable().scaledToFit()}}.frame(width:48,height:48);VStack(alignment:.leading){Text(family.text("name")).font(.headline);Text("الكود "+family.text("code")).font(.caption)}}}}}}
         Section{Button("تسجيل عائلة جديدة"){request=true};Button("دخول إدارة المنصة"){platform=true}}
-    }.navigationTitle("أهلًا بك").task(id:term){do{try await Task.sleep(nanoseconds:220_000_000);let rows=Item.items(try await api.request("/rest/v1/rpc/tenant_directory",method:"POST",body:["term":term],auth:false));try Task.checkCancellation();families=rows;error=""}catch{if !Task.isCancelled{self.error=api.errorText(error)}}}
+    }.navigationTitle("أهلًا بك").overlay{if loadingDirectory{LaunchScreen(progress:0.35)}}.task(id:term){defer{if !Task.isCancelled{loadingDirectory=false}};do{try await Task.sleep(nanoseconds:220_000_000);let rows=Item.items(try await api.request("/rest/v1/rpc/tenant_directory",method:"POST",body:["term":term],auth:false));try Task.checkCancellation();families=rows;error=""}catch{if !Task.isCancelled{self.error=api.errorText(error)}}}
     .confirmationDialog(selected?.text("name") ?? "",isPresented:Binding(get:{selected != nil},set:{if !$0{selected=nil}}),titleVisibility:.visible){Button("تأكيد الدخول وحفظ الكيان"){if let family=selected{Task{if api.signedIn{await api.logout()};api.selectFamily(family);selected=nil}}}}message:{Text("ستفتح واجهة هذه العائلة باسمها وشعارها مباشرة في المرات القادمة. "+(selected?.text("code")=="01" ? "ستتغير أيقونة التطبيق إلى شعار العائلة على الشاشة الرئيسية. يبقى اسم التطبيق العوائل وفق قيود الآيفون.":"تغيير أيقونة الشاشة الرئيسية لهذا الكيان يحتاج تحديثًا يتضمن شعاره. يبقى اسم التطبيق العوائل وفق قيود الآيفون."))}
     .sheet(isPresented:$request){NavigationStack{TenantRequestScreen()}}
     .sheet(isPresented:$platform){TenantPlatformLogin()}
