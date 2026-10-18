@@ -44,3 +44,9 @@ revoke all on function family_private.billing_action(text,jsonb)from public,anon
 do $$declare def text;begin select pg_get_functiondef('public.platform_action(text,jsonb)'::regprocedure)into def;def=replace(def,'elsif action=''save'' then',E'elsif action in(''plans'',''plan_save'',''invoices'',''assign_plan'',''invoice_paid'',''invoice_void'')then return family_private.billing_action(action,data);\n elsif action=''save'' then');execute def;end$$;
 notify pgrst,'reload schema';
 commit;
+begin;
+do $$declare def text;begin
+ select pg_get_functiondef('public.platform_action(text,jsonb)'::regprocedure)into def;
+ def=replace(def,'update family_private.tenants set code=',E'if data?''contact_email''and data->>''contact_email''is distinct from v.contact_email and(data->>''contact_email''!~''^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$''or length(data->>''contact_email'')>254)then raise exception ''تحقق من بريد مدير الكيان'';end if;\n if data?''contact_phone''and data->>''contact_phone''is distinct from v.contact_phone then data=jsonb_set(data,''{contact_phone}'',to_jsonb(family_private.phone_prefix(data->>''contact_phone'')));if data->>''contact_phone''!~''^\\+[1-9][0-9]{7,14}$''then raise exception ''تحقق من جوال مدير الكيان'';end if;end if;\n update family_private.tenants set contact_email=coalesce(nullif(lower(trim(data->>''contact_email'')),''''),contact_email),contact_phone=coalesce(nullif(trim(data->>''contact_phone''),''''),contact_phone),code=');execute def;
+end$$;
+commit;
