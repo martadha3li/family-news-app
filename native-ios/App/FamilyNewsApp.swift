@@ -293,16 +293,75 @@ struct TenantSubscriptionEditor:View {
     func display(_ item:Item){record=item;enabled = !item.text("subscription_ends_at").isEmpty;start=enabled ? dateValue(item.text("subscription_starts_at")):Date();end=enabled ? dateValue(item.text("subscription_ends_at")):Calendar(identifier:.gregorian).date(byAdding:.year,value:1,to:start)!;for(key,_)in subscriptionPlans{prices[key]=item.child("renewal_prices").text(key)}}
     func refresh()async throws{let rows=Item.items(try await api.rpc("platform_action",["action":"list"]));if let row=rows.first(where:{$0.id==family.id}){display(row)};await saved()}
     var priceText:String{record.child("renewal_prices").text(plan)}
-    var body:some View{Form{
-        Section("فترة الاشتراك"){TimelineView(.periodic(from:.now,by:60)){context in Text(subscriptionSummary(record,now:context.date))};Toggle("تحديد فترة الاشتراك",isOn:$enabled);if enabled{DatePicker("من",selection:$start,displayedComponents:[.date,.hourAndMinute]);DatePicker("إلى",selection:$end,displayedComponents:[.date,.hourAndMinute]);Text(subscriptionDuration(start,end)).font(.footnote)};Text("التواريخ بتوقيت الرياض. عرض نهاية الاشتراك لا يوقف الكيان تلقائيًا؛ الإيقاف من حالة الكيان.").font(.footnote).foregroundStyle(.secondary)}
-        Section("أسعار التجديد بالريال"){ForEach(subscriptionPlans,id:\.0){key,label in TextField(label,text:Binding(get:{prices[key] ?? ""},set:{prices[key]=$0})).keyboardType(.decimalPad)};TaskButton(title:"حفظ الفترة والأسعار",symbol:"checkmark"){
-            guard !enabled || end>start else{throw FamilyError(text:"يجب أن تكون النهاية بعد البداية")}
-            var amounts:[String:Double]=[:];for(key,_)in subscriptionPlans{let text=(prices[key] ?? "").trimmingCharacters(in:.whitespaces);if !text.isEmpty{guard let value=Double(text),value.isFinite,value>=0,value<=99999999.99,abs(value*100-(value*100).rounded())<0.00001 else{throw FamilyError(text:"تحقق من أسعار الباقات")};amounts[key]=value}}
-            let f=ISO8601DateFormatter();let data:[String:Any]=["id":family.id,"subscription_starts_at":enabled ? f.string(from:start) as Any:NSNull(),"subscription_ends_at":enabled ? f.string(from:end) as Any:NSNull(),"renewal_prices":amounts]
-            _ = try await api.rpc("platform_action",["action":"subscription_save","data":data]);try await refresh()
-        }}
-        Section("تجديد الاشتراك"){Picker("الباقة",selection:$plan){ForEach(subscriptionPlans,id:\.0){key,label in let price=record.child("renewal_prices").text(key);Text(label+" · "+(price.isEmpty ? "لم يحدد السعر":price+" ر.س")).tag(key)}};Picker("السداد",selection:$payment){Text("تم السداد يدويًا").tag("paid");Text("إعفاء من الرسوم").tag("waived")};Text("التجديد يضاف إلى نهاية الاشتراك الساري، أو يبدأ الآن إذا انتهى. لا يجري تحصيل إلكتروني.").font(.footnote);Button(renewing ? "جاري التجديد…":"تأكيد وتجديد الاشتراك"){confirm=true}.disabled(priceText.isEmpty || renewing);LoadError(text:error)}
-    }.navigationTitle("الاشتراك والتجديد").environment(\.timeZone,TimeZone(identifier:"Asia/Riyadh")!).onAppear{display(family)}.task{do{try await refresh()}catch{self.error=api.errorText(error)}}.confirmationDialog("تأكيد التجديد",isPresented:$confirm,titleVisibility:.visible){Button("تنفيذ التجديد"){
-        renewing=true;Task{defer{renewing=false};do{_ = try await api.rpc("platform_action",["action":"renew","data":["id":family.id,"months":Int(plan) ?? 0,"payment_status":payment,"request_id":requestID]]);requestID=UUID().uuidString;try await refresh();error=""}catch{self.error=api.errorText(error)}}
-    }}message:{Text(family.text("name")+" · "+(subscriptionPlans.first{$0.0==plan}?.1 ?? "")+" · "+(payment=="waived" ? "إعفاء من الرسوم":priceText+" ر.س مسددة يدويًا"))}}
+    var confirmationText:String {
+        let label=subscriptionPlans.first{$0.0==plan}?.1 ?? ""
+        let amount=payment=="waived" ? "إعفاء من الرسوم":priceText+" ر.س مسددة يدويًا"
+        return family.text("name")+" · "+label+" · "+amount
+    }
+    func priceLabel(_ key:String,_ label:String)->String {
+        let amount=record.child("renewal_prices").text(key)
+        return label+" · "+(amount.isEmpty ? "لم يحدد السعر":amount+" ر.س")
+    }
+    func savePeriod()async throws {
+        guard !enabled || end>start else{throw FamilyError(text:"يجب أن تكون النهاية بعد البداية")}
+        var amounts:[String:Double]=[:]
+        for(key,_)in subscriptionPlans{
+            let text=(prices[key] ?? "").trimmingCharacters(in:.whitespaces)
+            if !text.isEmpty{
+                guard let value=Double(text),value.isFinite,value>=0,value<=99999999.99,abs(value*100-(value*100).rounded())<0.00001 else{throw FamilyError(text:"تحقق من أسعار الباقات")}
+                amounts[key]=value
+            }
+        }
+        let formatter=ISO8601DateFormatter()
+        var data:[String:Any]=["id":family.id,"renewal_prices":amounts]
+        data["subscription_starts_at"]=enabled ? formatter.string(from:start) as Any:NSNull()
+        data["subscription_ends_at"]=enabled ? formatter.string(from:end) as Any:NSNull()
+        _ = try await api.rpc("platform_action",["action":"subscription_save","data":data])
+        try await refresh()
+    }
+    func renew()async {
+        renewing=true;defer{renewing=false}
+        do{
+            let data:[String:Any]=["id":family.id,"months":Int(plan) ?? 0,"payment_status":payment,"request_id":requestID]
+            _ = try await api.rpc("platform_action",["action":"renew","data":data])
+            requestID=UUID().uuidString;try await refresh();error=""
+        }catch{self.error=api.errorText(error)}
+    }
+    var periodSection:some View {
+        Section("فترة الاشتراك"){
+            TimelineView(.periodic(from:.now,by:60)){context in Text(subscriptionSummary(record,now:context.date))}
+            Toggle("تحديد فترة الاشتراك",isOn:$enabled)
+            if enabled{
+                DatePicker("من",selection:$start,displayedComponents:[.date,.hourAndMinute])
+                DatePicker("إلى",selection:$end,displayedComponents:[.date,.hourAndMinute])
+                Text(subscriptionDuration(start,end)).font(.footnote)
+            }
+            Text("التواريخ بتوقيت الرياض. عرض نهاية الاشتراك لا يوقف الكيان تلقائيًا؛ الإيقاف من حالة الكيان.").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+    var pricingSection:some View {
+        Section("أسعار التجديد بالريال"){
+            ForEach(subscriptionPlans,id:\.0){key,label in
+                TextField(label,text:Binding(get:{prices[key] ?? ""},set:{prices[key]=$0})).keyboardType(.decimalPad)
+            }
+            TaskButton(title:"حفظ الفترة والأسعار",symbol:"checkmark"){try await savePeriod()}
+        }
+    }
+    var renewalSection:some View {
+        Section("تجديد الاشتراك"){
+            Picker("الباقة",selection:$plan){ForEach(subscriptionPlans,id:\.0){key,label in Text(priceLabel(key,label)).tag(key)}}
+            Picker("السداد",selection:$payment){Text("تم السداد يدويًا").tag("paid");Text("إعفاء من الرسوم").tag("waived")}
+            Text("التجديد يضاف إلى نهاية الاشتراك الساري، أو يبدأ الآن إذا انتهى. لا يجري تحصيل إلكتروني.").font(.footnote)
+            Button(renewing ? "جاري التجديد…":"تأكيد وتجديد الاشتراك"){confirm=true}.disabled(priceText.isEmpty || renewing)
+            LoadError(text:error)
+        }
+    }
+    var body:some View {
+        Form{periodSection;pricingSection;renewalSection}
+        .navigationTitle("الاشتراك والتجديد")
+        .environment(\.timeZone,TimeZone(identifier:"Asia/Riyadh")!)
+        .onAppear{display(family)}
+        .task{do{try await refresh()}catch{self.error=api.errorText(error)}}
+        .confirmationDialog("تأكيد التجديد",isPresented:$confirm,titleVisibility:.visible){Button("تنفيذ التجديد"){Task{await renew()}}}message:{Text(confirmationText)}
+    }
 }
