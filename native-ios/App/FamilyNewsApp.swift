@@ -6,7 +6,7 @@ import LocalAuthentication
 @main struct FamilyNewsApp: App {
     @StateObject private var api=Backend()
     @StateObject private var alerts=NativeNotifications()
-    var body:some Scene {WindowGroup {RootScreen().environmentObject(api).environmentObject(alerts).environment(\.layoutDirection,.rightToLeft).environment(\.locale,Locale(identifier:"ar_SA")).tint(brandBlue)}}
+    var body:some Scene {WindowGroup {RootScreen().onAppear{FamilyTheme.update(api.family)}.environmentObject(api).environmentObject(alerts).environment(\.layoutDirection,.rightToLeft).environment(\.locale,Locale(identifier:"ar_SA")).tint(brandBlue)}}
 }
 struct TaskButton:View {
     let title:String
@@ -71,6 +71,7 @@ struct LoginScreen:View {
     @State private var relationship="father"
     @State private var sponsor=""
     @State private var sent=false
+    @State private var resultMessage=""
     @State private var recoverySent=false
     @State private var kinship:[Item]=[]
     @FocusState private var field:Int?
@@ -220,10 +221,10 @@ struct TenantRequestScreen:View {
     @State private var logo:UIImage?
     @State private var sent=false
     @State private var error=""
-    var body:some View{Form{Section("طلب كيان عائلي"){TextField("اسم العائلة",text:$name);TextField("رقم التواصل",text:$phoneText).keyboardType(.phonePad);TextField("البريد الإلكتروني",text:$email).keyboardType(.emailAddress).textInputAutocapitalization(.never);PhotosPicker(selection:$photo,matching:.images){Label("شعار العائلة",systemImage:"photo")};if let image=logo{Image(uiImage:image).resizable().scaledToFit().frame(height:140)};LoadError(text:error);Text("يبقى الطلب بانتظار مراجعة إدارة المنصة والتواصل بشأن الرسوم والتفعيل.").font(.footnote)};TaskButton(title:"إرسال الطلب",symbol:"paperplane"){
+    var body:some View{Form{Section("طلب كيان عائلي"){TextField("اسم العائلة",text:$name);TextField("رقم التواصل",text:$phoneText).keyboardType(.phonePad);TextField("البريد الإلكتروني",text:$email).keyboardType(.emailAddress).textInputAutocapitalization(.never);PhotosPicker(selection:$photo,matching:.images){Label("شعار العائلة",systemImage:"photo")};if let image=logo{Image(uiImage:image).resizable().scaledToFit().frame(height:140)};LoadError(text:error);Text("تجربة مجانية لمدة 30 يومًا دون انتظار تفعيل. بعد انتهائها يتوقف الإضافة والدردشة، وبعد 30 يومًا إضافية دون اشتراك يحذف الكيان وصوره وبياناته نهائيًا. أكّد بريدك لتصبح المدير.").font(.footnote)};TaskButton(title:"إرسال الطلب",symbol:"paperplane"){
         guard let image=logo else{throw FamilyError(text:"اختر شعار العائلة")};let scale=min(1,512/max(image.size.width,image.size.height));let size=CGSize(width:image.size.width*scale,height:image.size.height*scale);let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true;let rendered=UIGraphicsImageRenderer(size:size,format:format).image{ctx in UIColor.white.setFill();ctx.fill(CGRect(origin:.zero,size:size));image.draw(in:CGRect(origin:.zero,size:size))};guard let data=rendered.jpegData(compressionQuality:0.72),data.count<=200000 else{throw FamilyError(text:"اختر شعارًا أصغر")}
-        _ = try await api.request("/rest/v1/rpc/tenant_request",method:"POST",body:["data":["name":name,"phone":try phone(phoneText),"email":email,"logo":"data:image/jpeg;base64,"+data.base64EncodedString()]],auth:false);sent=true
-    }}.navigationTitle("تسجيل عائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.onChange(of:photo){_,item in Task{do{guard let data=try await item?.loadTransferable(type:Data.self),data.count<=20*1024*1024,let image=UIImage(data:data)else{throw FamilyError(text:"اختر صورة صالحة أقل من 20 ميجابايت")};logo=image;error=""}catch{self.error=api.errorText(error)}}}.alert("تم استلام الطلب",isPresented:$sent){Button("حسنًا"){dismiss()}}message:{Text("بانتظار تواصل إدارة المنصة بشأن الرسوم والتفعيل.")}}
+        resultMessage = (try await api.request("/rest/v1/rpc/tenant_request",method:"POST",body:["data":["name":name,"phone":try phone(phoneText),"email":email,"logo":"data:image/jpeg;base64,"+data.base64EncodedString()]],auth:false)) as? String ?? "تم إنشاء التجربة المجانية";sent=true
+    }}.navigationTitle("تسجيل عائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.onChange(of:photo){_,item in Task{do{guard let data=try await item?.loadTransferable(type:Data.self),data.count<=20*1024*1024,let image=UIImage(data:data)else{throw FamilyError(text:"اختر صورة صالحة أقل من 20 ميجابايت")};logo=image;error=""}catch{self.error=api.errorText(error)}}}.alert("تم استلام الطلب",isPresented:$sent){Button("حسنًا"){dismiss()}}message:{Text(resultMessage)}}
 }
 struct TenantPlatformLogin:View {
     @StateObject private var portal=Backend()
@@ -410,7 +411,7 @@ struct TenantOperationsScreen:View {
     }
     var maintenanceSection:some View {
         Section("دخول الصيانة بموافقة مدير الكيان"){
-            Text("تصريح ساعتين لقراءة الأخبار والإعدادات والتشخيص فقط. لا يشمل الرسائل الخاصة أو تعديل البيانات.").font(.footnote)
+            Text("تصريح صيانة يتيح إدارة الأعضاء والإعدادات والأخبار، لمدة يحددها مدير العائلة بالساعات. لا يشمل قراءة الرسائل الخاصة.").font(.footnote)
             TextField("سبب طلب الصيانة",text:$reason,axis:.vertical)
             TaskButton(title:"إرسال طلب موافقة",symbol:"wrench.and.screwdriver"){_ = try await rpc("maintenance_request",["reason":reason]);reason="";await load()}
             ForEach(operations.rows("maintenance")){r in VStack(alignment:.leading,spacing:8){Text(r.text("reason"));Text(r.text("status")).font(.caption).foregroundStyle(.secondary);if r.text("status")=="approved" && dateValue(r.text("expires_at"))>Date(){Button("دخول الصيانة المصرّح"){preview=r}}}}
@@ -419,10 +420,11 @@ struct TenantOperationsScreen:View {
     var body:some View {
         Form{LoadError(text:error);accessSection;usageSection;policySection;maintenanceSection}.navigationTitle(family.text("name")).environment(\.timeZone,TimeZone(identifier:"Asia/Riyadh")!).task{await load()}.refreshable{await load()}.confirmationDialog("تأكيد تغيير الدخول",isPresented:$confirm,titleVisibility:.visible){Button("تأكيد"){
             Task{do{var data:[String:Any]=["mode":mode];if mode=="suspended"{data["until"]=ISO8601DateFormatter().string(from:until)};_ = try await rpc("login_access",data);await load()}catch{self.error=api.errorText(error)}}
-        }}message:{Text(mode=="allowed" ? "إعادة إتاحة دخول أعضاء الكيان؟":"سيمنع دخول أعضاء هذا الكيان، مع حفظ البيانات.")}.sheet(item:$preview){r in NavigationStack{MaintenancePreviewScreen(family:family,request:r)}}
+        }}message:{Text(mode=="allowed" ? "إعادة إتاحة دخول أعضاء الكيان؟":"سيمنع دخول أعضاء هذا الكيان، مع حفظ البيانات.")}.sheet(item:$preview){r in NavigationStack{FamilyAdminDashboard(maintenance:r.id)}}
     }
 }
 struct FamilyMaintenanceScreen:View {
+    @State private var hours=2
     @EnvironmentObject private var api:Backend
     @State private var rows:[Item]=[]
     @State private var error=""
@@ -431,7 +433,7 @@ struct FamilyMaintenanceScreen:View {
     func load()async{do{rows=Item.items(try await api.action("maintenance_action","list"));error=""}catch{self.error=api.errorText(error)}}
     func choose(_ r:Item,_ operation:String){selected=r;action=operation}
     var body:some View {
-        List{Text("الموافقة تمنح إدارة المنصة ساعتين لقراءة أخبار العائلة وإعداداتها وتشخيصها. لا تتيح الرسائل الخاصة أو تعديل البيانات. يمكنك الإلغاء فورًا.").font(.footnote);LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:10){Text(r.text("reason")).font(.headline);Text(r.text("status")).font(.caption);if !r.text("expires_at").isEmpty{Text("ينتهي: "+dateValue(r.text("expires_at")).formatted())};if r.text("status")=="pending"{Button("موافقة لمدة ساعتين"){choose(r,"approve")};Button("رفض",role:.destructive){choose(r,"reject")}}else if r.text("status")=="approved"{Button("إلغاء تصريح الصيانة",role:.destructive){choose(r,"revoke")}}}}}.navigationTitle("طلبات صيانة المنصة").task{await load()}.refreshable{await load()}.confirmationDialog("تأكيد قرار الصيانة",isPresented:Binding(get:{selected != nil},set:{if !$0{selected=nil}}),titleVisibility:.visible){Button("تأكيد"){guard let r=selected else{return};selected=nil;Task{do{_ = try await api.action("maintenance_action",action,["id":r.id]);await load()}catch{self.error=api.errorText(error)}}}}message:{Text(action=="approve" ? "أوافق على إتاحة قراءة أخبار الكيان وإعداداته لإدارة المنصة لمدة ساعتين، دون الرسائل الخاصة أو التعديل.":"تأكيد رفض الطلب أو إلغاء التصريح؟")}
+        List{Stepper("مدة التصريح: \(hours) ساعة",value:$hours,in:1...72);Text("حدد مدة الصيانة من ساعة إلى 72 ساعة. يتيح التصريح إدارة الأعضاء والإعدادات والأخبار دون الرسائل الخاصة، ويمكن إلغاؤه فورًا.").font(.footnote);LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:10){Text(r.text("reason")).font(.headline);Text(r.text("status")).font(.caption);if !r.text("expires_at").isEmpty{Text("ينتهي: "+dateValue(r.text("expires_at")).formatted())};if r.text("status")=="pending"{Button("موافقة بالمدة المحددة"){choose(r,"approve")};Button("رفض",role:.destructive){choose(r,"reject")}}else if r.text("status")=="approved"{Button("إلغاء تصريح الصيانة",role:.destructive){choose(r,"revoke")}}}}}.navigationTitle("طلبات صيانة المنصة").task{await load()}.refreshable{await load()}.confirmationDialog("تأكيد قرار الصيانة",isPresented:Binding(get:{selected != nil},set:{if !$0{selected=nil}}),titleVisibility:.visible){Button("تأكيد"){guard let r=selected else{return};selected=nil;Task{do{_ = try await api.action("maintenance_action",action,["id":r.id,"hours":hours]);await load()}catch{self.error=api.errorText(error)}}}}message:{Text(action=="approve" ? "أوافق على دخول إدارة المنصة إلى لوحة صيانة عائلتي للمدة المحددة، دون قراءة الرسائل الخاصة.":"تأكيد رفض الطلب أو إلغاء التصريح؟")}
     }
 }
 struct MaintenancePreviewScreen:View {

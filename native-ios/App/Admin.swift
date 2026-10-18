@@ -128,3 +128,60 @@ struct KinshipReviewScreen:View {
     func load()async{do{rows=Item.items(try await api.action("family_action","admin_kinship_list"))}catch{self.error=api.errorText(error)}}
     var body:some View{List{Text("تأكيدك لصحة القرابة قد يفتح استثناء الدردشة الخاصة وفق ضوابط العائلة.").font(.footnote);LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:12){Text(r.text("display_name")+" · "+r.text("label")+" · "+r.text("member_name"));TaskButton(title:"أؤكد صحة القرابة",symbol:"checkmark.shield"){_ = try await api.action("family_action","admin_kinship_confirm",["owner":r.text("owner_id"),"member":r.text("member_id")]);await load()}.disabled(api.readOnly);TaskButton(title:"رفض",symbol:"xmark"){_ = try await api.action("family_action","admin_kinship_reject",["owner":r.text("owner_id"),"member":r.text("member_id")]);await load()}.disabled(api.readOnly)}}}.navigationTitle("تأكيد القرابة").task{await load()}}
 }
+
+struct FamilyAdminDashboard:View {
+    @EnvironmentObject private var api:Backend
+    @Environment(\.scenePhase)private var phase
+    var maintenance:String?=nil
+    @State private var data=Item()
+    @State private var error=""
+    @State private var name=""
+    @State private var photo:PhotosPickerItem?
+    @State private var logo=""
+    let keys=["chat_enabled","public_chat_enabled","private_chat_enabled","restrict_gender_chat","allow_groups","journalist_approval","auto_activate","endorsements_enabled"]
+    let labels=["تشغيل الدردشة","الدردشة العامة","الخاص","منع التواصل بين الجنسين","إنشاء المجموعات","موافقة المدير على أخبار الصحفي","التفعيل حسب العوائل","التعريف بالأعضاء"]
+    @State private var settings:[String:Bool]=[:]
+    func call(_ action:String,_ payload:[String:Any]=[:])async throws->Any{var p=payload;if let maintenance{p["maintenance"]=maintenance};return try await api.action("family_admin",action,p)}
+    func load()async{do{let result=Item(try await call("overview")as? [String:Any] ?? [:]);if data.raw.isEmpty{name=result.child("family").text("name");settings=Dictionary(uniqueKeysWithValues:keys.map{($0,result.child("settings").flag($0))})};data=result;error=""}catch{data=Item();self.error=api.errorText(error)}}
+    var summary:some View{Section("الكيان والاشتراك"){Text(data.child("family").text("name")).font(.headline);Text("الكود "+data.child("family").text("code"));Text(lifecycleDescription(data.child("lifecycle"))).font(.footnote);ForEach([("members","الأعضاء"),("pending","قيد الاعتماد"),("news","الأخبار"),("messages","الرسائل")],id:\.0){key,label in LabeledContent(label,value:String(data.number(key)))};NavigationLink("الأعضاء والإضافة اليدوية"){PreparedMembersScreen(maintenance:maintenance)}}}
+    var links:some View{Section("إدارة العائلة"){NavigationLink("الأعضاء والصلاحيات"){MembersScreen()};NavigationLink("مراجعة الأخبار"){NewsScreen(scope:.review)};NavigationLink("الأخبار المخفية"){NewsScreen(scope:.hidden)};NavigationLink("الإعلانات"){AdsAdminScreen()};NavigationLink("أسماء العوائل والتعريف"){SettingsScreen()};NavigationLink("خيارات القرابة"){KinshipAdminScreen()};NavigationLink("طلبات تغيير الجوال"){PhoneRequestsScreen()};NavigationLink("المساحة"){StorageScreen()};NavigationLink("طلبات صيانة المنصة"){FamilyMaintenanceScreen()}}}
+    var identity:some View{Section("هوية العائلة"){TextField("اسم العائلة",text:$name);PhotosPicker(selection:$photo,matching:.images){Label("تغيير الشعار والألوان",systemImage:"photo")};TaskButton(title:"حفظ الهوية",symbol:"checkmark"){var p:[String:Any]=["name":name];if !logo.isEmpty{p["logo"]=logo};_ = try await call("branding",p);if maintenance==nil{try await api.loadAccount()};await load()}.disabled(data.child("lifecycle").flag("read_only"))}}
+    var controls:some View{Section("النشر والدردشة"){ForEach(keys.indices,id:\.self){i in Toggle(labels[i],isOn:Binding(get:{settings[keys[i]] ?? false},set:{settings[keys[i]]=$0})).disabled(data.child("lifecycle").flag("read_only"))};TaskButton(title:"حفظ الضوابط",symbol:"checkmark"){_ = try await call("settings",["settings":settings]);await load()}.disabled(data.child("lifecycle").flag("read_only"))}}
+    var invoices:some View{Section("الفواتير"){ForEach(data.rows("invoices")){i in VStack(alignment:.leading){Text(i.text("plan_name"));Text(i.text("amount_sar")+" ر.س · "+i.text("status")).font(.caption)}};Text("للتجديد تواصل مع إدارة المنصة. لا توجد بوابة دفع إلكتروني مفعّلة.").font(.footnote)}}
+    var audit:some View{Section("سجل الإدارة والصيانة"){ForEach(data.rows("audit").indices,id:\.self){i in let row=data.rows("audit")[i];Text(row.text("action")+" · "+dateValue(row.text("created_at")).formatted()).font(.caption)}}}
+    var body:some View{Form{LoadError(text:error);if !data.raw.isEmpty{summary;if maintenance==nil{links}else{NavigationLink("مراجعة أخبار الكيان"){ScopedNewsAdminScreen(maintenance:maintenance!)}};identity;controls;invoices;audit}}.navigationTitle(maintenance==nil ? "لوحة إدارة العائلة":"صيانة العائلة").refreshable{await load()}.task(id:phase){guard phase == .active else{if maintenance != nil{data=Item()};return};await load();if maintenance != nil{while !Task.isCancelled{do{try await Task.sleep(nanoseconds:15_000_000_000)}catch{break};await load()}}}.onChange(of:photo){_,item in Task{do{guard let bytes=try await item?.loadTransferable(type:Data.self),bytes.count<=20*1024*1024,let image=UIImage(data:bytes)else{throw FamilyError(text:"اختر شعارًا صالحًا")};let scale=min(1,512/max(image.size.width,image.size.height));let size=CGSize(width:image.size.width*scale,height:image.size.height*scale);let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true;let output=UIGraphicsImageRenderer(size:size,format:format).image{ctx in UIColor.white.setFill();ctx.fill(CGRect(origin:.zero,size:size));image.draw(in:CGRect(origin:.zero,size:size))};guard let encoded=output.jpegData(compressionQuality:0.72),encoded.count<200000 else{throw FamilyError(text:"اختر شعارًا أصغر")};logo="data:image/jpeg;base64,"+encoded.base64EncodedString()}catch{self.error=api.errorText(error)}}}.privacySensitive()}
+}
+func lifecycleDescription(_ s:Item)->String{var text=s.flag("trial") ? "تجربة مجانية حتى "+dateValue(s.text("trial_ends_at")).formatted():s.text("subscription_ends_at").isEmpty ? "الكيان مفعّل":"الاشتراك حتى "+dateValue(s.text("subscription_ends_at")).formatted();if s.flag("read_only"){text+=" · للاطلاع فقط؛ جدد الاشتراك لاستعادة الإضافة والدردشة."};if !s.text("delete_after").isEmpty{text+=" · الحذف النهائي لكل الصور والبيانات: "+dateValue(s.text("delete_after")).formatted()}else if !s.text("renewal_notice_due").isEmpty{text+=" · بعد انتهاء الاشتراك: 6 أشهر للاطلاع ثم رسالة تجديد، والحذف بعد إرسالها بـ15 يومًا دون تجديد."};return text}
+struct PreparedMembersScreen:View {
+    @EnvironmentObject private var api:Backend
+    var maintenance:String?=nil
+    @State private var rows=Item()
+    @State private var error=""
+    @State private var full=""
+    @State private var email=""
+    @State private var mobile=""
+    @State private var gender="male"
+    @State private var role="member"
+    @State private var term=""
+    func call(_ action:String,_ payload:[String:Any]=[:])async throws->Any{var p=payload;if let maintenance{p["maintenance"]=maintenance};return try await api.action("family_admin",action,p)}
+    func load()async{do{rows=Item(try await call("members")as? [String:Any] ?? [:]);error=""}catch{rows=Item();self.error=api.errorText(error)}}
+    var add:some View{Section("إضافة عضو يدويًا"){Text("يُضاف العضو بصلاحيته، ثم يكمل التسجيل بالبريد نفسه ويؤكده قبل الدخول. لا نستخدم كلمة مرور مشتركة.").font(.footnote);TextField("الاسم الرباعي",text:$full);TextField("البريد",text:$email).keyboardType(.emailAddress).textInputAutocapitalization(.never);TextField("الجوال",text:$mobile).keyboardType(.phonePad);Picker("الجنس",selection:$gender){Text("ذكر").tag("male");Text("أنثى").tag("female")};Picker("الصلاحية",selection:$role){Text("عضو").tag("member");Text("صحفي").tag("journalist");Text("مدير").tag("admin")};TaskButton(title:"إضافة العضو",symbol:"person.badge.plus"){_ = try await call("member_add",["full_name":full,"email":email,"phone":try phone(mobile),"gender":gender,"role":role]);full="";email="";mobile="";await load()}}}
+    var body:some View{Form{LoadError(text:error);add;Section("بانتظار إكمال التسجيل"){ForEach(rows.rows("prepared")){p in VStack(alignment:.leading){Text(p.text("full_name"));Text(p.text("email")).font(.caption);TaskButton(title:"إلغاء الإضافة",symbol:"xmark"){_ = try await call("member_cancel",["id":p.id]);await load()}}}};Section("الأعضاء والصلاحيات"){ForEach(rows.rows("members").filter{term.isEmpty || [$0.text("display_name"),$0.text("phone"),$0.text("email")].joined(separator:" ").contains(term)}){p in NavigationLink{ScopedMemberEditor(member:p,maintenance:maintenance)}label:{VStack(alignment:.leading){Text(p.text("display_name"));Text(p.text("phone")+" · "+p.text("email")).font(.caption)}}}}}.navigationTitle("إدارة الأعضاء").searchable(text:$term,prompt:"الاسم أو الجوال أو البريد").task{await load()}.refreshable{await load()}}
+}
+struct ScopedMemberEditor:View {
+    @EnvironmentObject private var api:Backend
+    let member:Item
+    var maintenance:String?=nil
+    @State private var role="member"
+    @State private var status="pending"
+    @State private var notice=""
+    var body:some View{Form{Text(member.text("display_name")).font(.headline);Text(member.text("email"));Picker("الدور",selection:$role){Text("عضو").tag("member");Text("صحفي").tag("journalist");Text("مدير").tag("admin")};Picker("الحالة",selection:$status){Text("معتمد").tag("active");Text("بانتظار الاعتماد").tag("pending");Text("موقوف").tag("suspended")};TaskButton(title:"حفظ",symbol:"checkmark"){var p:[String:Any]=["id":member.id,"role":role,"status":status];if let maintenance{p["maintenance"]=maintenance};_ = try await api.action("family_admin","member_update",p);notice="تم الحفظ"}.disabled(member.flag("is_root") || member.id==api.user.id);Text(notice)}.navigationTitle("صلاحية العضو").onAppear{role=member.text("role");status=member.text("status")}}
+
+struct ScopedNewsAdminScreen:View {
+ @EnvironmentObject private var api:Backend
+ let maintenance:String
+ @State private var rows:[Item]=[]
+ @State private var error=""
+ func load()async{do{rows=Item.items(try await api.action("family_admin","news",["maintenance":maintenance]));error=""}catch{rows=[];self.error=api.errorText(error)}}
+ var body:some View{List{LoadError(text:error);ForEach(rows){p in VStack(alignment:.leading,spacing:10){Text(p.text("title")).font(.headline);Text(p.text("body"));TaskButton(title:p.flag("published") ? "إلغاء النشر":"اعتماد ونشر",symbol:"checkmark"){_ = try await api.action("family_admin","news_update",["maintenance":maintenance,"id":p.id,"published": !p.flag("published")]);await load()}}}}.navigationTitle("أخبار الكيان").task{await load()}.refreshable{await load()}}
+}

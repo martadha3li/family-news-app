@@ -4,7 +4,7 @@ root=Path(__file__).resolve().parents[1]
 source=(root/'App/Backend.swift').read_text()
 core=source[source.index('struct Item:'):source.index('enum CredentialStore')]
 core += source[source.index('struct MentionToken:'):source.index('func q(')]
-core += source[source.index('func q('):source.index('let brandBlue=')]
+core += source[source.index('func q('):source.index('var brandBlue:')]
 tests=r'''
 func expect(_ value:Bool,_ label:String) {precondition(value,label)}
 expect(try phone("0501234567")=="+966501234567","Saudi mobile")

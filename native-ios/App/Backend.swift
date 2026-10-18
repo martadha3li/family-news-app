@@ -95,8 +95,8 @@ enum CredentialStore {
     func logout() async {do {_ = try await request("/auth/v1/logout",method:"POST")}catch{};clearSession()}
     func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];if !isolatedSession{CredentialStore.clear()};signedIn=false;platformAdmin=false;user=Item();profile=Item()}
     func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details.merging(["family_code":family.text("code")]){_,new in new}],auth:false)}
-    func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw.filter{!($0.value is NSNull)},forKey:"family-selection");syncFamilyIcon()}
-    func exitFamily()async{await logout();family=Item();UserDefaults.standard.removeObject(forKey:"family-selection");syncFamilyIcon()}
+    func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw.filter{!($0.value is NSNull)},forKey:"family-selection");FamilyTheme.update(family);syncFamilyIcon()}
+    func exitFamily()async{await logout();family=Item();UserDefaults.standard.removeObject(forKey:"family-selection");FamilyTheme.update(family);syncFamilyIcon()}
     func checkFamilyAccess()async {
         let epoch=sessionGeneration
         guard signedIn else{return}
@@ -159,8 +159,8 @@ func phone(_ input:String)throws->String {
     return s
 }
 func dateValue(_ value:String)->Date {let f=ISO8601DateFormatter();f.formatOptions=[.withInternetDateTime,.withFractionalSeconds];return f.date(from:value) ?? ISO8601DateFormatter().date(from:value) ?? .distantPast}
-let brandBlue=Color(red:0.224,green:0.482,blue:0.612)
-let brandPink=Color(red:0.675,green:0.314,blue:0.545)
+var brandBlue:Color{FamilyTheme.primary}
+var brandPink:Color{FamilyTheme.accent}
 
 func desiredFamilyIcon(code:String,identifier:String,available:Set<String>)->String?{
     if code=="01",available.contains("Family01"){return "Family01"}
@@ -187,5 +187,15 @@ func desiredFamilyIcon(code:String,identifier:String,available:Set<String>)->Str
             if let error=error{report?("تعذّر تغيير أيقونة التطبيق: "+error.localizedDescription)}
             if wanted != target{apply()}
         }}
+    }
+}
+
+// Logo palettes are computed once when the selected tenant changes.
+enum FamilyTheme {
+    static var primary:Color{color(UserDefaults.standard.string(forKey:"family-theme-primary") ?? "123747")}
+    static var accent:Color{color(UserDefaults.standard.string(forKey:"family-theme-accent") ?? "94763c")}
+    static func color(_ hex:String)->Color{let n=UInt32(hex,radix:16) ?? 0x123747;return Color(red:Double((n>>16)&255)/255,green:Double((n>>8)&255)/255,blue:Double(n&255)/255)}
+    static func update(_ family:Item){var palette=["123747","94763c"];if family.text("code")=="01"{palette=["397b9c","ac508b"]}else if let data=Data(base64Encoded:family.text("logo").components(separatedBy:",").last ?? ""),let image=UIImage(data:data),let cg=image.cgImage{var bytes=[UInt8](repeating:0,count:64*64*4);if let ctx=CGContext(data:&bytes,width:64,height:64,bitsPerComponent:8,bytesPerRow:256,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue){ctx.draw(cg,in:CGRect(x:0,y:0,width:64,height:64));var bins:[Int:[Int]]=[:];for i in stride(from:0,to:bytes.count,by:4){let r=Int(bytes[i]),g=Int(bytes[i+1]),b=Int(bytes[i+2]);if bytes[i+3]<180 || max(r,g,b)-min(r,g,b)<30 || max(r,g,b)<35{continue};let key=(r/32)*64+(g/32)*8+b/32;var v=bins[key] ?? [0,0,0,0];v[0]+=r;v[1]+=g;v[2]+=b;v[3]+=1;bins[key]=v};let ranked=bins.values.sorted{$0[3]>$1[3]};let colors=ranked.map{v in [v[0]/v[3],v[1]/v[3],v[2]/v[3]]};if let first=colors.first{let second=colors.first{abs($0[0]-first[0])+abs($0[1]-first[1])+abs($0[2]-first[2])>150} ?? first;palette=[first,second].map{rgb in var c=rgb;while (Double(c[0])*0.2126+Double(c[1])*0.7152+Double(c[2])*0.0722)>115{c=c.map{Int(Double($0)*0.92)}};return c.map{String(format:"%02x",$0)}.joined()}}}}
+        UserDefaults.standard.set(palette[0],forKey:"family-theme-primary");UserDefaults.standard.set(palette[1],forKey:"family-theme-accent")
     }
 }
