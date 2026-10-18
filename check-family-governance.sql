@@ -41,11 +41,13 @@ select set_config('request.jwt.claim.sub',(select user_id::text from family_priv
 set local role family_api_executor;
 select public.platform_action('usage',jsonb_build_object('id',(select id from governance_ids where kind='tenant')));
 select public.platform_action('maintenance_request',jsonb_build_object('id',(select id from governance_ids where kind='tenant'),'reason','اختبار تصريح قراءة التشخيص'));
-do $$begin
- begin perform public.platform_action('maintenance_open',jsonb_build_object('id',(select id from governance_ids where kind='tenant'),'request',(select r.id from family_private.maintenance_requests r where false)));exception when insufficient_privilege then null;end;
-end$$;
 reset role;
 update governance_ids set id=(select id from family_private.maintenance_requests where tenant_id=(select id from governance_ids where kind='tenant'))where kind='request';
+set local role family_api_executor;
+do $$begin
+ begin perform public.platform_action('maintenance_open',jsonb_build_object('id',(select id from governance_ids where kind='tenant'),'request',(select id from governance_ids where kind='request')));raise exception 'NO_CONSENT_BYPASS';exception when raise_exception then if sqlerrm='NO_CONSENT_BYPASS'then raise;end if;end;
+end$$;
+reset role;
 select set_config('request.jwt.claim.sub',(select id::text from governance_ids where kind='female'),true);
 set local role family_api_executor;
 do $$begin begin perform public.maintenance_action('approve',jsonb_build_object('id',(select id from governance_ids where kind='request')));raise exception 'NONADMIN_APPROVED';exception when raise_exception then if sqlerrm='NONADMIN_APPROVED'then raise;end if;end;end$$;
@@ -67,7 +69,7 @@ do $$begin begin perform public.platform_action('maintenance_open',jsonb_build_o
 reset role;
 update family_private.tenants set subscription_starts_at=now()-interval '1 year',subscription_ends_at=now()-interval '1 day'where id=(select id from governance_ids where kind='tenant');
 select set_config('request.jwt.claim.sub',(select id::text from governance_ids where kind='male'),true);
-set local role family_api_executor;
+set local role authenticated;
 do $$begin
  if not(public.tenant_current()->>'read_only')::boolean then raise exception 'missing read-only flag';end if;
  if(select count(*)from public.posts)<>1 then raise exception 'expired news not readable';end if;
