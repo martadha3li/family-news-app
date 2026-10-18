@@ -1,0 +1,26 @@
+begin;
+create temp table billing_test(tid uuid,pid uuid,rid uuid,iid uuid);grant select,update on billing_test to authenticated;
+insert into billing_test values(gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),null);
+insert into family_private.tenants(id,code,name,contact_phone,contact_email)select tid,'BILL-TEST','اختبار الفوترة','+966500008877','bill@example.invalid'from billing_test;
+select set_config('request.jwt.claim.sub',(select user_id::text from family_private.platform_admins limit 1),true);
+set local role authenticated;
+update billing_test set pid=(public.platform_action('plan_save','{"name":"باقة اختبار","duration_count":6,"duration_unit":"month","price_sar":100,"enabled":true}')->>'id')::uuid;
+update billing_test set iid=(public.platform_action('assign_plan',jsonb_build_object('id',tid,'plan_id',pid,'request_id',rid))->>'id')::uuid;
+do $$declare x jsonb;begin
+ x=public.platform_action('assign_plan',jsonb_build_object('id',(select tid from billing_test),'plan_id',(select pid from billing_test),'request_id',(select rid from billing_test)));
+ if(x->>'id')::uuid<>(select iid from billing_test)then raise exception 'replayed assignment duplicated invoice';end if;
+ perform public.platform_action('plan_save',jsonb_build_object('id',(select pid from billing_test),'name','باقة معدلة','duration_count',1,'duration_unit','year','price_sar',200,'enabled',true));
+ select r into x from jsonb_array_elements(public.platform_action('invoices',jsonb_build_object('id',(select tid from billing_test))))r where r->>'id'=(select iid::text from billing_test);
+ if(x->>'amount_sar')::numeric<>100 or(x->>'duration_count')::int<>6 then raise exception 'invoice snapshot changed';end if;
+ begin perform public.platform_action('invoice_paid',jsonb_build_object('invoice',(select iid from billing_test)));raise exception 'UNCONFIRMED_PAYMENT';exception when raise_exception then if sqlerrm='UNCONFIRMED_PAYMENT'then raise;end if;end;
+ x=public.platform_action('invoice_paid',jsonb_build_object('invoice',(select iid from billing_test),'confirm','MANUAL_PAYMENT_RECEIVED'));
+ if x->>'status'<>'paid'or(x->>'ends_at')::timestamptz<>(x->>'starts_at')::timestamptz+interval '6 months'then raise exception 'settlement duration wrong';end if;
+ if public.platform_action('invoice_paid',jsonb_build_object('invoice',(select iid from billing_test),'confirm','MANUAL_PAYMENT_RECEIVED'))<>x then raise exception 'duplicate settlement';end if;
+end$$;
+reset role;
+select set_config('request.jwt.claim.sub',gen_random_uuid()::text,true);
+set local role authenticated;
+do $$begin begin perform public.platform_action('invoices');raise exception 'MEMBER_INVOICES';exception when raise_exception then if sqlerrm='MEMBER_INVOICES'then raise;end if;end;begin perform count(*)from family_private.billing_invoices;raise exception 'DIRECT_INVOICES';exception when insufficient_privilege then null;end;end$$;
+reset role;
+select 'PASS: central plans, immutable invoice price and duration, assignment/settlement idempotency, confirmation and administrator-only billing' result;
+rollback;

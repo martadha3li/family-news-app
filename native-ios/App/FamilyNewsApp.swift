@@ -232,7 +232,7 @@ struct TenantPlatformLogin:View {
     @State private var username="admin"
     @State private var password=""
     @State private var authorized=false
-    var body:some View{NavigationStack{Group{if authorized{TenantPlatformList().environmentObject(portal)}else{Form{Text("إدارة المنصة للمالك المتحقق منه. استخدم كلمة مرور حسابك الحالية.").font(.footnote);TextField("اسم الدخول أو البريد",text:$username).textInputAutocapitalization(.never);SecureField("كلمة المرور",text:$password);TaskButton(title:"دخول الإدارة",symbol:"lock.shield"){try await portal.platformLogin(username:username,password:password);password="";authorized=true}}.environmentObject(portal).navigationTitle("إدارة المنصة")}}.toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){portal.clearSession();dismiss()}}}}.onChange(of:phase){_,value in if value == .background{portal.clearSession();dismiss()}}}
+    var body:some View{NavigationStack{Group{if authorized{PlatformDashboard().environmentObject(portal)}else{Form{Text("إدارة المنصة للمالك المتحقق منه. استخدم كلمة مرور حسابك الحالية.").font(.footnote);TextField("اسم الدخول أو البريد",text:$username).textInputAutocapitalization(.never);SecureField("كلمة المرور",text:$password);TaskButton(title:"دخول الإدارة",symbol:"lock.shield"){try await portal.platformLogin(username:username,password:password);password="";authorized=true}}.environmentObject(portal).navigationTitle("إدارة المنصة")}}.toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){portal.clearSession();dismiss()}}}}.onChange(of:phase){_,value in if value == .background{portal.clearSession();dismiss()}}}
 }
 struct TenantPlatformList:View {
     @EnvironmentObject private var api:Backend
@@ -253,7 +253,7 @@ struct TenantPlatformEditor:View {
     @State private var payment="unpaid"
     @State private var fee="0"
     @State private var notes=""
-    var body:some View{Form{Section("بيانات الكيان"){TextField("اسم العائلة",text:$name);TextField("الكود",text:$code).textInputAutocapitalization(.never);Text(family.text("contact_email"));Text(family.text("contact_phone"))};Section("السداد والتفعيل"){TextField("الرسوم بالريال",text:$fee).keyboardType(.decimalPad);Picker("السداد",selection:$payment){Text("غير مسدد").tag("unpaid");Text("مسدد").tag("paid");Text("معفى").tag("waived")};Picker("الحالة",selection:$status){Text("بانتظار التفعيل").tag("pending");Text("مفعّل").tag("active");Text("موقوف").tag("suspended");Text("مرفوض").tag("rejected")};TextField("ملاحظات الإدارة",text:$notes,axis:.vertical)};Section("الاشتراك"){NavigationLink("فترة الاشتراك والتجديد"){TenantSubscriptionEditor(family:family,saved:saved)};NavigationLink("الاستهلاك والدخول والصيانة"){TenantOperationsScreen(family:family)}};TaskButton(title:"حفظ التغييرات",symbol:"checkmark"){guard let amount=Double(fee),amount>=0 else{throw FamilyError(text:"تحقق من الرسوم")};_ = try await api.rpc("platform_action",["action":"save","data":["id":family.id,"name":name,"code":code,"status":status,"payment_status":payment,"fee_sar":amount,"notes":notes]]);await saved();dismiss()}}.navigationTitle("إدارة الكيان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onAppear{name=family.text("name");code=family.text("code");status=family.text("status");payment=family.text("payment_status");fee=family.text("fee_sar");notes=family.text("notes")}}
+    var body:some View{Form{Section("بيانات الكيان"){TextField("اسم العائلة",text:$name);TextField("الكود",text:$code).textInputAutocapitalization(.never);Text(family.text("contact_email"));Text(family.text("contact_phone"))};Section("السداد والتفعيل"){Picker("السداد",selection:$payment){Text("غير مسدد").tag("unpaid");Text("مسدد").tag("paid");Text("معفى").tag("waived")};Picker("الحالة",selection:$status){Text("بانتظار التفعيل").tag("pending");Text("مفعّل").tag("active");Text("موقوف").tag("suspended");Text("مرفوض").tag("rejected")};TextField("ملاحظات الإدارة",text:$notes,axis:.vertical)};Section("الاشتراك"){NavigationLink("فترة الاشتراك والتجديد"){TenantPlanScreen(family:family)};NavigationLink("الاستهلاك والدخول والصيانة"){TenantOperationsScreen(family:family)}};TaskButton(title:"حفظ التغييرات",symbol:"checkmark"){guard let amount=Double(fee),amount>=0 else{throw FamilyError(text:"تحقق من الرسوم")};_ = try await api.rpc("platform_action",["action":"save","data":["id":family.id,"name":name,"code":code,"status":status,"payment_status":payment,"fee_sar":amount,"notes":notes]]);await saved();dismiss()}}.navigationTitle("إدارة الكيان").toolbar{ToolbarItem(placement:.cancellationAction){Button("إلغاء"){dismiss()}}}.onAppear{name=family.text("name");code=family.text("code");status=family.text("status");payment=family.text("payment_status");fee=family.text("fee_sar");notes=family.text("notes")}}
 }
 
 let subscriptionPlans:[(String,String)]=[("12","سنة"),("24","سنتان"),("36","٣ سنوات"),("6","٦ أشهر")]
@@ -445,4 +445,71 @@ struct MaintenancePreviewScreen:View {
     var body:some View {
         List{Text(data.text("scope")).font(.footnote);LoadError(text:error);if !data.text("expires_at").isEmpty{Text("ينتهي التصريح: "+dateValue(data.text("expires_at")).formatted())};Section("الأخبار · قراءة فقط"){ForEach(data.rows("news")){p in VStack(alignment:.leading,spacing:8){Text(p.text("title")).font(.headline);Text(p.text("body"))}}};Section("تشخيص الإعدادات"){ForEach([("chat_enabled","الدردشة"),("private_chat_enabled","الخاص"),("restrict_gender_chat","فصل الجنسين"),("journalist_approval","موافقة نشر الصحفي")],id:\.0){key,label in LabeledContent(label,value:data.child("settings").flag(key) ? "مفعّل":"معطّل")}}}.navigationTitle("صيانة "+family.text("name")).toolbar{ToolbarItem(placement:.cancellationAction){Button("خروج"){data=Item();dismiss()}}}.task(id:phase){guard phase == .active else{data=Item();return};while !Task.isCancelled{do{data=Item(try await api.rpc("platform_action",["action":"maintenance_open","data":["id":family.id,"request":request.id]])as? [String:Any] ?? [:]);error="";try await Task.sleep(nanoseconds:15_000_000_000)}catch{data=Item();if !Task.isCancelled{self.error=api.errorText(error)};break}}}.privacySensitive()
     }
+}
+
+let billingUnits=[("year","سنة"),("month","شهر"),("week","أسبوع"),("day","يوم")]
+func billingPeriod(_ i:Item)->String{String(i.number("duration_count"))+" "+(billingUnits.first{$0.0==i.text("duration_unit")}?.1 ?? "")}
+func invoiceMessage(_ i:Item)->String{["منصة العوائل · مطالبة سداد #"+i.text("number"),"العائلة: "+i.text("tenant_name")+" · "+i.text("tenant_code"),"الباقة: "+i.text("plan_name"),"المدة: "+billingPeriod(i),"الإجمالي: "+i.text("amount_sar")+" ريال سعودي","المدة تبدأ بعد السداد أو نهاية الاشتراك الساري.","هذه مطالبة سداد وليست فاتورة ضريبية."].joined(separator:"\n")}
+func invoiceShareURL(_ i:Item,whatsapp:Bool)->URL? {
+    let text=invoiceMessage(i).addingPercentEncoding(withAllowedCharacters:.alphanumerics) ?? ""
+    if whatsapp{guard let mobile=try? phone(i.text("contact_phone"))else{return nil};return URL(string:"https://wa.me/"+mobile.replacingOccurrences(of:"+",with:"")+"?text="+text)}
+    let email=i.text("contact_email");guard email.contains("@"),!email.contains("\n"),!email.contains("\r")else{return nil}
+    let safe=email.addingPercentEncoding(withAllowedCharacters:.alphanumerics) ?? ""
+    return URL(string:"mailto:"+safe+"?subject="+("مطالبة اشتراك "+i.text("number")).addingPercentEncoding(withAllowedCharacters:.alphanumerics)!+"&body="+text)
+}
+struct PlatformDashboard:View {
+    var body:some View{List{Section("إدارة المنصة المستقلة"){NavigationLink("الكيانات العائلية"){TenantPlatformList()};NavigationLink("الباقات والاشتراكات"){BillingPlansScreen()};NavigationLink("الفواتير ومطالبات السداد"){BillingInvoicesScreen(tenant:nil)}}}.navigationTitle("إدارة المنصة")}
+}
+struct BillingPlansScreen:View {
+    @EnvironmentObject private var api:Backend
+    @State private var rows:[Item]=[]
+    @State private var error=""
+    @State private var edit:Item?
+    func load()async{do{rows=Item.items(try await api.rpc("platform_action",["action":"plans"]));error=""}catch{self.error=api.errorText(error)}}
+    var body:some View{List{Text("حدد المدد والأسعار هنا ثم اختر الباقة في الكيان. المطالبات السابقة تحتفظ بسعرها.").font(.footnote);LoadError(text:error);ForEach(rows){r in Button{edit=r}label:{VStack(alignment:.leading,spacing:6){Text(r.text("name")).font(.headline);Text(billingPeriod(r)+" · "+(r.text("price_sar").isEmpty ? "السعر غير محدد":r.text("price_sar")+" ر.س"));Text(r.flag("enabled") ? "مفعّلة":"معطّلة").font(.caption)}}}}.navigationTitle("الباقات والاشتراكات").toolbar{Button{edit=Item(["id":"new","duration_count":1,"duration_unit":"year"])}label:{Image(systemName:"plus")}}.task{await load()}.sheet(item:$edit){r in NavigationStack{BillingPlanEditor(plan:r){await load()}}}}
+}
+struct BillingPlanEditor:View {
+    @EnvironmentObject private var api:Backend
+    @Environment(\.dismiss)private var dismiss
+    let plan:Item
+    let saved:()async->Void
+    @State private var name=""
+    @State private var count=1
+    @State private var unit="year"
+    @State private var price=""
+    @State private var enabled=false
+    var body:some View{Form{TextField("اسم الباقة",text:$name);Stepper("المدة: \(count)",value:$count,in:1...3650);Picker("الوحدة",selection:$unit){ForEach(billingUnits,id:\.0){key,label in Text(label).tag(key)}};TextField("السعر بالريال",text:$price).keyboardType(.decimalPad);Toggle("تفعيل الباقة",isOn:$enabled);TaskButton(title:"حفظ الباقة",symbol:"checkmark"){
+        var data:[String:Any]=["name":name,"duration_count":count,"duration_unit":unit,"enabled":enabled]
+        if plan.id != "new"{data["id"]=plan.id}
+        if price.isEmpty{data["price_sar"]=NSNull()}else{guard let amount=Double(price),amount.isFinite,amount>=0 else{throw FamilyError(text:"تحقق من السعر")};data["price_sar"]=amount}
+        _ = try await api.rpc("platform_action",["action":"plan_save","data":data]);await saved();dismiss()
+    }}.navigationTitle("تعريف الاشتراك").toolbar{Button("إلغاء"){dismiss()}}.onAppear{name=plan.text("name");count=max(1,plan.number("duration_count"));unit=plan.text("duration_unit");price=plan.text("price_sar");enabled=plan.flag("enabled")}}
+}
+struct TenantPlanScreen:View {
+    @EnvironmentObject private var api:Backend
+    let family:Item
+    @State private var plans:[Item]=[]
+    @State private var selected=""
+    @State private var error=""
+    @State private var confirm=false
+    @State private var requestID=UUID().uuidString
+    @State private var showInvoices=false
+    func load()async{do{plans=Item.items(try await api.rpc("platform_action",["action":"plans"]));selected=family.text("billing_plan_id")}catch{self.error=api.errorText(error)}}
+    var body:some View{Form{Text(subscriptionSummary(family));LoadError(text:error);Picker("الاشتراك",selection:$selected){Text("اختر الباقة").tag("");ForEach(plans.filter{$0.flag("enabled")}){p in Text(p.text("name")+" · "+p.text("price_sar")+" ر.س").tag(p.id)}};Text("التعيين ينشئ مطالبة سداد تلقائيًا. يبدأ التجديد بعد تسجيل استلام السداد، دون تحصيل إلكتروني حاليًا.").font(.footnote);Button("تعيين الباقة وإنشاء المطالبة"){confirm=true}.disabled(selected.isEmpty);NavigationLink("مطالبات الكيان"){BillingInvoicesScreen(tenant:family.id)}}.navigationTitle("اشتراك "+family.text("name")).task{await load()}.confirmationDialog("تأكيد التعيين وإنشاء المطالبة",isPresented:$confirm,titleVisibility:.visible){Button("تأكيد"){Task{do{_ = try await api.rpc("platform_action",["action":"assign_plan","data":["id":family.id,"plan_id":selected,"request_id":requestID]]);requestID=UUID().uuidString;showInvoices=true;error=""}catch{self.error=api.errorText(error)}}}}message:{Text("تُلغى المطالبات السابقة غير المسددة فقط. لا تتغير المدة حتى تسجيل السداد.")}.sheet(isPresented:$showInvoices){NavigationStack{BillingInvoicesScreen(tenant:family.id).toolbar{Button("إغلاق"){showInvoices=false}}}}}
+}
+struct BillingInvoicesScreen:View {
+    @EnvironmentObject private var api:Backend
+    let tenant:String?
+    @State private var rows:[Item]=[]
+    @State private var error=""
+    func load()async{do{var data:[String:Any]=[:];if let tenant=tenant{data["id"]=tenant};rows=Item.items(try await api.rpc("platform_action",["action":"invoices","data":data]));error=""}catch{self.error=api.errorText(error)}}
+    var body:some View{List{LoadError(text:error);if rows.isEmpty{Text("لا توجد مطالبات سداد")};ForEach(rows){r in InvoiceNativeCard(invoice:r){await load()}}}.navigationTitle("الفواتير والمطالبات").task{await load()}.refreshable{await load()}}
+}
+struct InvoiceNativeCard:View {
+    @EnvironmentObject private var api:Backend
+    let invoice:Item
+    let changed:()async->Void
+    @State private var confirm=false
+    @State private var error=""
+    var body:some View{VStack(alignment:.leading,spacing:12){Text("مطالبة #"+invoice.text("number")).font(.headline);Text(invoice.text("tenant_name")+" · "+invoice.text("plan_name"));Text(invoice.text("amount_sar")+" ر.س").bold();Text(invoice.text("status")=="paid" ? "مسددة":invoice.text("status")=="void" ? "ملغاة":"بانتظار السداد");Text("مطالبة غير ضريبية. المشاركة تفتح رسالة جاهزة ولا تعني إرسالها.").font(.caption).foregroundStyle(.secondary);if let email=invoiceShareURL(invoice,whatsapp:false){Link("مشاركة بالبريد",destination:email)};if let wa=invoiceShareURL(invoice,whatsapp:true){Link("مشاركة بواتساب",destination:wa)};ShareLink(item:invoiceMessage(invoice)){Label("مشاركة المطالبة",systemImage:"square.and.arrow.up")};if invoice.text("status")=="issued"{Button("تسجيل استلام السداد وتجديد الاشتراك"){confirm=true}};LoadError(text:error)}.padding(.vertical,10).confirmationDialog("هل استلمت السداد فعليًا؟",isPresented:$confirm,titleVisibility:.visible){Button("تأكيد السداد والتجديد"){Task{do{_ = try await api.rpc("platform_action",["action":"invoice_paid","data":["invoice":invoice.id,"confirm":"MANUAL_PAYMENT_RECEIVED"]]);await changed()}catch{self.error=api.errorText(error)}}}}message:{Text(invoice.text("amount_sar")+" ر.س. لا يوجد سحب أو تحصيل إلكتروني مفعّل.")}}
 }
