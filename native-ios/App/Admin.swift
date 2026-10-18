@@ -177,6 +177,8 @@ struct ScopedMemberEditor:View {
     @State private var notice=""
     var body:some View{Form{Text(member.text("display_name")).font(.headline);Text(member.text("email"));Picker("الدور",selection:$role){Text("عضو").tag("member");Text("صحفي").tag("journalist");Text("مدير").tag("admin")};Picker("الحالة",selection:$status){Text("معتمد").tag("active");Text("بانتظار الاعتماد").tag("pending");Text("موقوف").tag("suspended")};TaskButton(title:"حفظ",symbol:"checkmark"){var p:[String:Any]=["id":member.id,"role":role,"status":status];if let maintenance{p["maintenance"]=maintenance};_ = try await api.action("family_admin","member_update",p);notice="تم الحفظ"}.disabled(member.flag("is_root") || member.id==api.user.id);Text(notice)}.navigationTitle("صلاحية العضو").onAppear{role=member.text("role");status=member.text("status")}}
 
+}
+
 struct ScopedNewsAdminScreen:View {
  @EnvironmentObject private var api:Backend
  let maintenance:String
