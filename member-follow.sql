@@ -58,7 +58,7 @@ do $$declare def text;begin
  select pg_get_functiondef('family_private.push_backend(text,jsonb)'::regprocedure)into def;
  def:=replace(def,'''kind'',j.kind,','''kind'',j.kind,''post_id'',case when j.kind=''news''then j.item else null end,''is_follow'',j.follow_event,');
  def:=replace(def,'when j.kind=''news'' then s.news and exists','when j.kind=''news'' then(s.news or(j.follow_event and s.follow_alerts and exists(select 1 from family_private.follow_events e join family_private.member_follows f on f.tenant_id=e.tenant_id and f.follower_id=e.recipient_id and f.followed_id=e.subject_id join public.profiles subject on subject.id=e.subject_id and subject.status=''active'' where e.tenant_id=j.tenant_id and e.recipient_id=j.user_id and e.post_id::text=j.item)))and exists');
- def:=replace(def,'t.status=''active''' ,'t.status=''active''and family_private.tenant_available(t.id)');execute def;
+ def:=replace(def,'and t.status=''active''' ,'and t.status=''active''and family_private.tenant_available(t.id)');execute def;
  -- Store the new preference on subscribe; older clients opt in by default.
  select pg_get_functiondef('family_private.push_action(text,jsonb)'::regprocedure)into def;
  def:=replace(def,'subscription,news,private_chat)','subscription,news,private_chat,follow_alerts)');

@@ -29,6 +29,10 @@ do $$begin
  if(select count(*)from family_private.follow_events where post_id=(select id from follow_posts))<>1 then raise exception 'duplicate publication and mention event';end if;
  if not exists(select 1 from family_private.push_jobs where user_id=(select id from follow_ids where kind='fan')and item=(select id::text from follow_posts)and follow_event)then raise exception 'follower push missing with general news disabled';end if;
 end$$;
+do $$declare jobs jsonb;begin
+ jobs:=family_private.push_backend('claim');
+ if not exists(select 1 from jsonb_array_elements(jobs)e where e->>'post_id'=(select id::text from follow_posts)and(e->>'is_follow')::boolean and jsonb_array_length(e->'subscriptions')=1)then raise exception 'delivery did not respect follower opt-in with general news off';end if;
+end$$;
 select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='fan'),true);
 set local role authenticated;
 do $$declare x jsonb;begin
