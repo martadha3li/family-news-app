@@ -22,6 +22,7 @@ insert into family_private.push_subscriptions(tenant_id,endpoint,user_id,subscri
 create temp table follow_posts(id bigint);grant select,insert on follow_posts to authenticated;
 select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='writer'),true);
 set local role authenticated;
+insert into public.posts(author_id,title,body,published,mentioned_member_ids)values(auth.uid(),'مسودة لا تظهر','مسودة @subject احمد حسن اختبار',false,array[(select id from follow_ids where kind='subject')]);
 with p as(insert into public.posts(author_id,title,body,published,mentioned_member_ids,image_paths)values(auth.uid(),'خبر متابعة الاختبار','خبر @subject احمد حسن اختبار',true,array[(select id from follow_ids where kind='subject')],array[auth.uid()::text||'/follow.jpg'])returning id)insert into follow_posts select id from p;
 reset role;
 do $$begin

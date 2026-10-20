@@ -9,6 +9,7 @@ extension Notification.Name {static let openFamilyNotifications=Notification.Nam
     @Published var error=""
     @Published var permission="لم تُفعّل التنبيهات بعد"
     @Published var newsEnabled=true
+    @Published var followsEnabled=true
     @Published var privateEnabled=true
     @Published var visibleThread=""
     private var owner=""
@@ -17,8 +18,8 @@ extension Notification.Name {static let openFamilyNotifications=Notification.Nam
     private var through=""
     private var busy=false
     override init(){super.init();UNUserNotificationCenter.current().delegate=self}
-    func configure(_ user:String){guard owner != user else{return};reset();owner=user;let defaults=UserDefaults.standard;newsEnabled=defaults.object(forKey:"news-alerts-"+user) as? Bool ?? true;privateEnabled=defaults.object(forKey:"private-alerts-"+user) as? Bool ?? true}
-    func savePreferences(){guard !owner.isEmpty else{return};UserDefaults.standard.set(newsEnabled,forKey:"news-alerts-"+owner);UserDefaults.standard.set(privateEnabled,forKey:"private-alerts-"+owner)}
+    func configure(_ user:String){guard owner != user else{return};reset();owner=user;let defaults=UserDefaults.standard;followsEnabled=defaults.object(forKey:"follow-alerts-"+user)as? Bool ?? true;newsEnabled=defaults.object(forKey:"news-alerts-"+user) as? Bool ?? true;privateEnabled=defaults.object(forKey:"private-alerts-"+user) as? Bool ?? true}
+    func savePreferences(){guard !owner.isEmpty else{return};UserDefaults.standard.set(followsEnabled,forKey:"follow-alerts-"+owner);UserDefaults.standard.set(newsEnabled,forKey:"news-alerts-"+owner);UserDefaults.standard.set(privateEnabled,forKey:"private-alerts-"+owner)}
     func reset(){owner="";items=[];unread=0;error="";cursor = .distantPast;readAt = .distantPast;through="";visibleThread="";UNUserNotificationCenter.current().removeAllPendingNotificationRequests();UNUserNotificationCenter.current().removeAllDeliveredNotifications();Task{try? await UNUserNotificationCenter.current().setBadgeCount(0)}}
     func enable()async throws {let allowed=try await UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound,.badge]);await updatePermission();if !allowed{throw FamilyError(text:"السماح بالإشعارات مغلق. يمكنك تفعيله من إعدادات الآيفون > الإشعارات > أخبار العائلة.")}}
     func updatePermission()async {let settings=await UNUserNotificationCenter.current().notificationSettings();switch settings.authorizationStatus{case .authorized,.provisional,.ephemeral:permission="التنبيهات مفعّلة أثناء فتح التطبيق";case .denied:permission="الإشعارات غير مسموحة من إعدادات الجهاز";default:permission="لم تُفعّل التنبيهات بعد"}}
@@ -32,7 +33,7 @@ extension Notification.Name {static let openFamilyNotifications=Notification.Nam
             items=next;readAt=dateValue(data.text("read_at"));through=data.text("server_at");cursor=latest;unread=next.filter{dateValue($0.text("created_at"))>readAt}.count;error=""
             if UIApplication.shared.applicationState == .active,previous != .distantPast,!markRead {
                 let fresh=next.filter{dateValue($0.text("created_at"))>previous && dateValue($0.text("created_at"))>readAt}
-                let hasNews=newsEnabled && fresh.contains{$0.text("kind")=="news"}
+                let hasNews=(newsEnabled && fresh.contains{$0.text("kind")=="news" && $0.text("follow_reason").isEmpty}) || (followsEnabled && fresh.contains{$0.text("kind")=="news" && !$0.text("follow_reason").isEmpty})
                 let hasMessages=privateEnabled && fresh.contains{$0.text("kind")=="private" && $0.text("thread_id") != visibleThread}
                 if hasNews || hasMessages {
                     let content=UNMutableNotificationContent();content.title="أخبار العائلة";content.body=hasNews && hasMessages ? "لديك أخبار جديدة ورسائل واردة":(hasMessages ? "لديك رسالة خاصة جديدة":"نُشر خبر جديد للعائلة");content.sound = .default;content.badge=NSNumber(value:unread);content.userInfo=["open":"notifications"]
@@ -69,7 +70,7 @@ struct NotificationsScreen:View {
             Section("تنبيهات الجهاز"){
                 TaskButton(title:"تفعيل الإشعارات",symbol:"bell.badge"){try await alerts.enable()}
                 Text(alerts.permission).font(.caption).foregroundStyle(.secondary)
-                Toggle("الأخبار الجديدة",isOn:$alerts.newsEnabled).onChange(of:alerts.newsEnabled){_,_ in alerts.savePreferences()}
+                Toggle("الحسابات التي أتابعها والمنشن",isOn:$alerts.followsEnabled).onChange(of:alerts.followsEnabled){_,_ in alerts.savePreferences()};Toggle("الأخبار الجديدة",isOn:$alerts.newsEnabled).onChange(of:alerts.newsEnabled){_,_ in alerts.savePreferences()}
                 Toggle("الرسائل الخاصة",isOn:$alerts.privateEnabled).onChange(of:alerts.privateEnabled){_,_ in alerts.savePreferences()}
                 Text("تصل التنبيهات في هذه النسخة أثناء فتح التطبيق. تبقى الأخبار والرسائل غير المقروءة في هذه القائمة عند عودتك.").font(.caption).foregroundStyle(.secondary)
                 Button("إعدادات إشعارات الآيفون"){if let url=URL(string:UIApplication.openNotificationSettingsURLString){UIApplication.shared.open(url)}}
