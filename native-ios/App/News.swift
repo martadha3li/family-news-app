@@ -38,15 +38,17 @@ struct NativePost:View {
     @State private var comments=false
     @State private var commentCount=0
     @State private var confirmDelete=false
+    @State private var sharedNews:SharedExport?
     @State private var issue=""
     var editable:Bool{api.admin || (api.writer && post.text("author_id")==api.user.id)}
     var body:some View{VStack(alignment:.leading,spacing:0){HStack(spacing:10){NavigationLink{MemberScreen(member:post.text("author_id"))}label:{HStack(spacing:10){Avatar(path:post.child("profiles").text("avatar_path"),name:post.child("profiles").text("display_name"));VStack(alignment:.leading,spacing:3){Text(post.child("profiles").text("display_name")).font(.subheadline.weight(.semibold));Text(dateValue(post.text("created_at")),style:.date).font(.caption2).foregroundStyle(.secondary)}}.foregroundStyle(.primary)}.buttonStyle(.plain);Spacer();if editable{Menu{Button("تعديل الخبر",systemImage:"pencil"){edit()};Button(scope == .hidden ? "استعادة الخبر":"إخفاء الخبر",systemImage:scope == .hidden ? "arrow.uturn.backward":"eye.slash"){Task{do{_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["deleted_at":scope == .hidden ? NSNull():ISO8601DateFormatter().string(from:Date())]);await refresh()}catch{issue=api.errorText(error)}}};if api.admin{Button("حذف نهائي",systemImage:"trash",role:.destructive){confirmDelete=true}}}label:{Image(systemName:"ellipsis").frame(width:44,height:44)}}}.padding(.horizontal,14).padding(.vertical,10)
         if !post.imagePaths.isEmpty{NewsAlbum(paths:post.imagePaths)}
-        HStack(spacing:20){TaskButton(title:"",symbol:liked ? "heart.fill":"heart"){if liked{_ = try await api.table("likes",[q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)],method:"DELETE")}else{_ = try await api.table("likes",method:"POST",body:["post_id":post.id,"user_id":api.user.id])};liked.toggle();count += liked ? 1 : -1}.disabled(api.readOnly).foregroundStyle(liked ? brandPink:Color.primary).accessibilityLabel(liked ? "إلغاء الإعجاب":"إعجاب");Button{withAnimation(.easeInOut(duration:0.2)){comments.toggle()}}label:{Image(systemName:"bubble.right")}.accessibilityLabel("تعليقات الخبر");Spacer()}.font(.system(size:24)).buttonStyle(.plain).padding(.horizontal,12).padding(.vertical,6)
+        HStack(spacing:20){TaskButton(title:"",symbol:liked ? "heart.fill":"heart"){if liked{_ = try await api.table("likes",[q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)],method:"DELETE")}else{_ = try await api.table("likes",method:"POST",body:["post_id":post.id,"user_id":api.user.id])};liked.toggle();count += liked ? 1 : -1}.disabled(api.readOnly).foregroundStyle(liked ? brandPink:Color.primary).accessibilityLabel(liked ? "إلغاء الإعجاب":"إعجاب");Button{withAnimation(.easeInOut(duration:0.2)){comments.toggle()}}label:{Image(systemName:"bubble.right")}.accessibilityLabel("تعليقات الخبر");if post.flag("published") && post.text("deleted_at").isEmpty{TaskButton(title:"",symbol:"paperplane"){let image=try await newsShareImage(post,api:api);sharedNews=SharedExport(items:[image])}.accessibilityLabel("مشاركة الخبر كصورة")};Spacer()}.font(.system(size:24)).buttonStyle(.plain).padding(.horizontal,12).padding(.vertical,6)
         Text("\(count) إعجاب").font(.subheadline.bold()).padding(.horizontal,14).padding(.bottom,4)
         VStack(alignment:.leading,spacing:6){Text(post.text("title")).font(.subheadline.bold());MentionBody(post:post);if scope == .mentioned{NavigationLink("فتح الخبر"){PostDestination(postID:post.id)}.font(.subheadline.bold())};if !post.flag("published"){Text(post.text("moderation_status")=="pending" ? "بانتظار موافقة المدير":"مسودة").font(.caption).foregroundStyle(brandPink)};if scope == .review && api.admin{HStack{TaskButton(title:"اعتماد ونشر",symbol:"checkmark"){_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["published":true,"moderation_status":"published"]);await refresh()};TaskButton(title:"رفض",symbol:"xmark"){_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["published":false,"moderation_status":"rejected"]);await refresh()}}.buttonStyle(.bordered)}}.padding(.horizontal,16).padding(.bottom,18)
             if comments{InlineComments(post:post,changed:{commentCount=max(0,commentCount+$0)}).padding(.horizontal,14).padding(.bottom,12).transition(.opacity.combined(with:.move(edge:.top)))}
     }.background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius:4)).overlay{RoundedRectangle(cornerRadius:4).stroke(Color(.separator).opacity(0.18),lineWidth:0.5)}.task(id:post.id){commentCount=post.rows("comments").first?.number("count") ?? 0;count=post.rows("likes").first?.number("count") ?? 0;do{liked = !(try await api.table("likes",[q("select","user_id"),q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)])).isEmpty}catch{}}
+    .sheet(item:$sharedNews){NativeShareSheet(export:$0)}
     .alert("حذف الخبر نهائيًا؟",isPresented:$confirmDelete){Button("إلغاء",role:.cancel){};Button("حذف",role:.destructive){Task{do{let rows=try await api.table("posts",[q("id","eq."+post.id)],method:"DELETE");guard !rows.isEmpty else{throw FamilyError(text:"لم يتم حذف الخبر.")};for path in post.imagePaths{let shared=try await api.table("posts",[q("select","id"),q("image_paths","cs.{"+path+"}"),q("limit","1")]);if shared.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":[path]])}};await refresh()}catch{issue=api.errorText(error)}}}}message:{Text("سيُحذف الخبر وتعليقاته وإعجاباته، ولا يمكن استعادته.")}.alert("تعذّر إكمال الطلب",isPresented:Binding(get:{!issue.isEmpty},set:{if !$0{issue=""}})){Button("حسنًا",role:.cancel){}}message:{Text(issue)}}
 }
 struct InlineComments:View {
@@ -275,4 +277,31 @@ struct PopupAdvertisement:View {
         .task{remaining=max(1,campaign.ad.number("display_seconds"));while remaining>0{do{try await Task.sleep(nanoseconds:1_000_000_000)}catch{return};if phase == .active{remaining-=1}};dismiss()}
         .privacySensitive()
     }
+}
+
+@MainActor func newsShareImage(_ post:Item,api:Backend)async throws->UIImage {
+ guard post.flag("published"),post.text("deleted_at").isEmpty else{throw FamilyError(text:"المشاركة للأخبار المنشورة والمتاحة فقط")}
+ var cover:UIImage?
+ if let path=post.imagePaths.first{cover=UIImage(data:try await api.signedData(bucket:"news-images",path:path))}
+ let paragraph=NSMutableParagraphStyle();paragraph.alignment = .right;paragraph.baseWritingDirection = .rightToLeft
+ let titleAttributes:[NSAttributedString.Key:Any]=[.font:UIFont.boldSystemFont(ofSize:36),.paragraphStyle:paragraph,.foregroundColor:UIColor.label]
+ let bodyAttributes:[NSAttributedString.Key:Any]=[.font:UIFont.systemFont(ofSize:28),.paragraphStyle:paragraph,.foregroundColor:UIColor.black]
+ let titleHeight=(post.text("title")as NSString).boundingRect(with:CGSize(width:960,height:12000),options:[.usesLineFragmentOrigin,.usesFontLeading],attributes:titleAttributes,context:nil).height+20
+ let bodyHeight=(post.text("body")as NSString).boundingRect(with:CGSize(width:960,height:12000),options:[.usesLineFragmentOrigin,.usesFontLeading],attributes:bodyAttributes,context:nil).height+20
+ let height:CGFloat=230+(cover==nil ? 0:1130)+titleHeight+bodyHeight+100
+ guard height<15000 else{throw FamilyError(text:"نص الخبر طويل جدًا لتصديره كصورة واحدة")}
+ let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true
+ return UIGraphicsImageRenderer(size:CGSize(width:1080,height:height),format:format).image{ctx in
+ UIColor.white.setFill();ctx.fill(CGRect(x:0,y:0,width:1080,height:height));var y:CGFloat=160
+ let familyName=api.family.text("name").isEmpty ? "منصة العوائل":api.family.text("name")
+ (familyName as NSString).draw(in:CGRect(x:320,y:35,width:700,height:48),withAttributes:[.font:UIFont.boldSystemFont(ofSize:32),.foregroundColor:UIColor(red:0.07,green:0.22,blue:0.28,alpha:1),.paragraphStyle:paragraph])
+ (post.child("profiles").text("display_name")as NSString).draw(in:CGRect(x:320,y:90,width:700,height:38),withAttributes:[.font:UIFont.systemFont(ofSize:24),.foregroundColor:UIColor.darkGray,.paragraphStyle:paragraph])
+ let logo=tenantLogo(api.family) ?? UIImage(named:api.family.text("code")=="01" ? "FamilyLogo":"PlatformLogo")
+ if let logo{let scale=min(220/logo.size.width,100/logo.size.height);logo.draw(in:CGRect(x:60,y:30,width:logo.size.width*scale,height:logo.size.height*scale))}
+ if let image=cover{UIColor.systemGray6.setFill();ctx.fill(CGRect(x:0,y:y,width:1080,height:1080));let scale=min(1080/image.size.width,1080/image.size.height);image.draw(in:CGRect(x:(1080-image.size.width*scale)/2,y:y+(1080-image.size.height*scale)/2,width:image.size.width*scale,height:image.size.height*scale));y += 1130}
+ (post.text("title")as NSString).draw(in:CGRect(x:60,y:y,width:960,height:titleHeight),withAttributes:titleAttributes);y += titleHeight+15
+ (post.text("body")as NSString).draw(in:CGRect(x:60,y:y,width:960,height:bodyHeight),withAttributes:bodyAttributes)
+ let footer="خبر رقم "+post.id+" · "+dateValue(post.text("created_at")).formatted(date:.numeric,time:.omitted)
+ (footer as NSString).draw(in:CGRect(x:60,y:height-55,width:960,height:40),withAttributes:[.font:UIFont.systemFont(ofSize:22),.foregroundColor:UIColor.darkGray,.paragraphStyle:paragraph])
+ }
 }

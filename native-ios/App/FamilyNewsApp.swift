@@ -222,18 +222,19 @@ struct TenantRequestScreen:View {
     @State private var resultMessage=""
     @State private var error=""
     func submit()async throws {
-        guard let image=logo else{throw FamilyError(text:"اختر شعار العائلة")}
-        let scale=min(1,512/max(image.size.width,image.size.height))
-        let size=CGSize(width:image.size.width*scale,height:image.size.height*scale)
-        let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true
-        let rendered=UIGraphicsImageRenderer(size:size,format:format).image{ctx in UIColor.white.setFill();ctx.fill(CGRect(origin:.zero,size:size));image.draw(in:CGRect(origin:.zero,size:size))}
-        guard let bytes=rendered.jpegData(compressionQuality:0.72),bytes.count<=200000 else{throw FamilyError(text:"اختر شعارًا أصغر")}
-        let data:[String:Any]=["name":name,"phone":try phone(phoneText),"email":email,"logo":"data:image/jpeg;base64,"+bytes.base64EncodedString()]
+        var data:[String:Any]=["name":name,"phone":try phone(phoneText),"email":email]
+        if let image=logo{
+            let scale=min(1,512/max(image.size.width,image.size.height));let size=CGSize(width:image.size.width*scale,height:image.size.height*scale)
+            let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true
+            let rendered=UIGraphicsImageRenderer(size:size,format:format).image{ctx in UIColor.white.setFill();ctx.fill(CGRect(origin:.zero,size:size));image.draw(in:CGRect(origin:.zero,size:size))}
+            guard let bytes=rendered.jpegData(compressionQuality:0.72),bytes.count<=200000 else{throw FamilyError(text:"اختر شعارًا أصغر")}
+            data["logo"]="data:image/jpeg;base64,"+bytes.base64EncodedString()
+        }
         let result=try await api.request("/rest/v1/rpc/tenant_request",method:"POST",body:["data":data],auth:false)
         resultMessage=result as? String ?? "تم إنشاء التجربة المجانية";sent=true
     }
     func loadPhoto(_ item:PhotosPickerItem?)async{do{guard let data=try await item?.loadTransferable(type:Data.self),data.count<=20*1024*1024,let image=UIImage(data:data)else{throw FamilyError(text:"اختر صورة صالحة أقل من 20 ميجابايت")};logo=image;error=""}catch{self.error=api.errorText(error)}}
-    var fields:some View{Section("كيان عائلي جديد"){TextField("اسم العائلة",text:$name);TextField("رقم التواصل",text:$phoneText).keyboardType(.phonePad);TextField("البريد الإلكتروني",text:$email).keyboardType(.emailAddress).textInputAutocapitalization(.never);PhotosPicker(selection:$photo,matching:.images){Label("شعار العائلة",systemImage:"photo")};if let image=logo{Image(uiImage:image).resizable().scaledToFit().frame(height:140)};Text("تجربة مجانية لمدة 30 يومًا دون انتظار تفعيل. بعد انتهائها يتوقف الإضافة والدردشة، وبعد 30 يومًا إضافية دون اشتراك يحذف الكيان وصوره وبياناته نهائيًا. أكّد بريدك لتصبح المدير.").font(.footnote)}}
+    var fields:some View{Section("كيان عائلي جديد"){TextField("اسم العائلة",text:$name);TextField("رقم التواصل",text:$phoneText).keyboardType(.phonePad);TextField("البريد الإلكتروني",text:$email).keyboardType(.emailAddress).textInputAutocapitalization(.never);PhotosPicker(selection:$photo,matching:.images){Label("شعار العائلة · اختياري",systemImage:"photo")};if let image=logo{Image(uiImage:image).resizable().scaledToFit().frame(height:140)};Text("تجربة مجانية لمدة 30 يومًا دون انتظار تفعيل. بعد انتهائها يتوقف الإضافة والدردشة، وبعد 30 يومًا إضافية دون اشتراك يحذف الكيان وصوره وبياناته نهائيًا. أكّد بريدك لتصبح المدير.").font(.footnote)}}
     var body:some View{Form{fields;LoadError(text:error);TaskButton(title:"بدء التجربة المجانية",symbol:"paperplane"){try await submit()}}.navigationTitle("تسجيل عائلة").toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.onChange(of:photo){_,item in Task{await loadPhoto(item)}}.alert("تم إنشاء عائلتك",isPresented:$sent){Button("حسنًا"){dismiss()}}message:{Text(resultMessage)}}
 }
 struct TenantPlatformLogin:View {
