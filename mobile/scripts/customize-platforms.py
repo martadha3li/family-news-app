@@ -7,7 +7,7 @@ icon=Image.open(root/'www/icon-512.png').convert('RGB')
 android=root/'android/app/src/main/res'
 if android.exists():
  gradle=root/'android/app/build.gradle'
- text=gradle.read_text().replace('versionCode 1','versionCode 6').replace('versionName "1.0"','versionName "1.4.0"');gradle.write_text(text)
+ text=gradle.read_text().replace('versionCode 1','versionCode 7').replace('versionName "1.0"','versionName "1.5.0"');gradle.write_text(text)
  for density,size in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
   folder=android/('mipmap-'+density);folder.mkdir(parents=True,exist_ok=True)
   for name in ['ic_launcher.png','ic_launcher_round.png','ic_launcher_foreground.png']:icon.resize((size,size)).save(folder/name)
@@ -35,6 +35,13 @@ if android.exists():
  for name,label,asset,enabled in [('PlatformLauncher','العوائل','@mipmap/ic_launcher','true'),('Family01Launcher','أخبار العائلة','@drawable/family_01_icon','false')]:
   alias=ET.SubElement(app,'activity-alias',{('{'+ns+'}'+k):v for k,v in dict(name='.'+name,targetActivity='.MainActivity',label=label,icon=asset,enabled=enabled,exported='true').items()})
   filt=ET.SubElement(alias,'intent-filter');ET.SubElement(filt,'action',{'{'+ns+'}name':'android.intent.action.MAIN'});ET.SubElement(filt,'category',{'{'+ns+'}name':'android.intent.category.LAUNCHER'})
+ # Private, read-only export URIs are granted only to the app selected in the share sheet.
+ for provider in list(app.findall('provider')):
+  if provider.get('{'+ns+'}authorities')=='${applicationId}.familyexports':app.remove(provider)
+ provider=ET.SubElement(app,'provider',{'{'+ns+'}name':'androidx.core.content.FileProvider','{'+ns+'}authorities':'${applicationId}.familyexports','{'+ns+'}exported':'false','{'+ns+'}grantUriPermissions':'true'})
+ ET.SubElement(provider,'meta-data',{'{'+ns+'}name':'android.support.FILE_PROVIDER_PATHS','{'+ns+'}resource':'@xml/family_export_paths'})
+ (android/'xml').mkdir(exist_ok=True)
+ (android/'xml/family_export_paths.xml').write_text('<?xml version="1.0" encoding="utf-8"?><paths xmlns:android="http://schemas.android.com/apk/res/android"><cache-path name="exports" path="family-exports/"/></paths>')
  tree.write(manifest,encoding='utf-8',xml_declaration=True)
 ios=root/'ios/App/App'
 if ios.exists():

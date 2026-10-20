@@ -1,5 +1,5 @@
 import {Capacitor,registerPlugin} from './capacitor-core.mjs';
-const NativeFamilyBrand=registerPlugin('FamilyBrand');
+export const NativeFamilyBrand=registerPlugin('FamilyBrand');
 export function familyIconURL(family,size=512){return family?.code==='01'?'/family-01-icon-'+size+'.png':family?.logo||'/icon-'+size+'.png'}
 export function syncFamilyIcons(family){
  const name=family?.name||'منصة العوائل';
