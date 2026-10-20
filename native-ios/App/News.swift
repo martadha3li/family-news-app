@@ -284,7 +284,7 @@ struct PopupAdvertisement:View {
  var cover:UIImage?
  if let path=post.imagePaths.first{cover=UIImage(data:try await api.signedData(bucket:"news-images",path:path))}
  let paragraph=NSMutableParagraphStyle();paragraph.alignment = .right;paragraph.baseWritingDirection = .rightToLeft
- let titleAttributes:[NSAttributedString.Key:Any]=[.font:UIFont.boldSystemFont(ofSize:36),.paragraphStyle:paragraph,.foregroundColor:UIColor.label]
+ let titleAttributes:[NSAttributedString.Key:Any]=[.font:UIFont.boldSystemFont(ofSize:36),.paragraphStyle:paragraph,.foregroundColor:UIColor.black]
  let bodyAttributes:[NSAttributedString.Key:Any]=[.font:UIFont.systemFont(ofSize:28),.paragraphStyle:paragraph,.foregroundColor:UIColor.black]
  let titleHeight=(post.text("title")as NSString).boundingRect(with:CGSize(width:960,height:12000),options:[.usesLineFragmentOrigin,.usesFontLeading],attributes:titleAttributes,context:nil).height+20
  let bodyHeight=(post.text("body")as NSString).boundingRect(with:CGSize(width:960,height:12000),options:[.usesLineFragmentOrigin,.usesFontLeading],attributes:bodyAttributes,context:nil).height+20
@@ -298,7 +298,7 @@ struct PopupAdvertisement:View {
  (post.child("profiles").text("display_name")as NSString).draw(in:CGRect(x:320,y:90,width:700,height:38),withAttributes:[.font:UIFont.systemFont(ofSize:24),.foregroundColor:UIColor.darkGray,.paragraphStyle:paragraph])
  let logo=tenantLogo(api.family) ?? UIImage(named:api.family.text("code")=="01" ? "FamilyLogo":"PlatformLogo")
  if let logo{let scale=min(220/logo.size.width,100/logo.size.height);logo.draw(in:CGRect(x:60,y:30,width:logo.size.width*scale,height:logo.size.height*scale))}
- if let image=cover{UIColor.systemGray6.setFill();ctx.fill(CGRect(x:0,y:y,width:1080,height:1080));let scale=min(1080/image.size.width,1080/image.size.height);image.draw(in:CGRect(x:(1080-image.size.width*scale)/2,y:y+(1080-image.size.height*scale)/2,width:image.size.width*scale,height:image.size.height*scale));y += 1130}
+ if let image=cover{UIColor(white:0.96,alpha:1).setFill();ctx.fill(CGRect(x:0,y:y,width:1080,height:1080));let scale=min(1080/image.size.width,1080/image.size.height);image.draw(in:CGRect(x:(1080-image.size.width*scale)/2,y:y+(1080-image.size.height*scale)/2,width:image.size.width*scale,height:image.size.height*scale));y += 1130}
  (post.text("title")as NSString).draw(in:CGRect(x:60,y:y,width:960,height:titleHeight),withAttributes:titleAttributes);y += titleHeight+15
  (post.text("body")as NSString).draw(in:CGRect(x:60,y:y,width:960,height:bodyHeight),withAttributes:bodyAttributes)
  let footer="خبر رقم "+post.id+" · "+dateValue(post.text("created_at")).formatted(date:.numeric,time:.omitted)
