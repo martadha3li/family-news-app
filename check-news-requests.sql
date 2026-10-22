@@ -32,7 +32,7 @@ select set_config('request.jwt.claim.sub',(select id::text from follow_ids where
 set local role authenticated;
 do $$declare x jsonb;begin if jsonb_array_length(public.news_request_action('mention_search','{"term":"0500007703"}'))<>1 then raise exception 'PHONE_MENTION_SEARCH';end if;
 begin perform public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request'),'mentions',jsonb_build_array((select id from follow_ids where kind='outsider'))));raise exception 'CROSS_MENTION';exception when raise_exception then if sqlerrm='CROSS_MENTION'then raise;end if;end;
-x:=public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request'),'mention_requester',true));if(x->>'published')::boolean then raise exception 'BYPASSED_MANAGER';end if;
+perform public.news_request_action('claim',jsonb_build_object('id',(select id from request_test where key='request')));x:=public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request'),'mention_requester',true));if(x->>'published')::boolean then raise exception 'BYPASSED_MANAGER';end if;
 begin perform public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request')));raise exception 'DOUBLE_PUBLICATION';exception when raise_exception then if sqlerrm='DOUBLE_PUBLICATION'then raise;end if;end;
 end$$;
 reset role;

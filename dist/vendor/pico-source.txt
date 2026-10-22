@@ -1,0 +1,9 @@
+picojs source pinned to afffa50ec4134a47005f2cbf8112eaa69f65f37e; pico.js: MIT license as declared by author.
+facefinder source: nenadmarkus/pico c2e81f9d23cc11d1a612fd21e4f9de0921a5d0d9 rnt/cascades/facefinder.
+## License
+
+MIT.
+
+## Updates and similar projects
+
+Visit <https://nenadmarkus.com>.

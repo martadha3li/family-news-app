@@ -313,7 +313,7 @@ func newsRequestStatus(_ value:String)->String {return ["pending":"بانتظا�
 struct NewsRequestMenu:View {
  @EnvironmentObject private var api:Backend
  @State private var meta=Item()
- var body:some View{Section("طلبات الأخبار"){NavigationLink("طلب نشر خبر"){NewNewsRequestScreen()};NavigationLink("طلبات أخباري"){NewsRequestsScreen(review:false)};if meta.flag("writer"){NavigationLink("مراجعة طلبات الأخبار · \(meta.number("pending"))"){NewsRequestsScreen(review:true)}};if meta.flag("admin"){NavigationLink("أنواع الأخبار وصياغتها"){NewsTemplatesScreen()}}}.task{await load()}.onReceive(Timer.publish(every:30,on:.main,in:.common).autoconnect()){_ in Task{await load()}}}
+ var body:some View{Section("طلبات الأخبار"){NavigationLink("طلب نشر خبر"){NewNewsRequestScreen()};NavigationLink("طلبات أخباري"){NewsRequestsScreen(review:false)};if meta.flag("writer"){NavigationLink("مراجعة طلبات الأخبار · \(meta.number("pending"))"){NewsRequestsScreen(review:true)};NavigationLink("سجل مراجعة واعتماد الأخبار"){NewsRequestHistoryScreen()}};if meta.flag("admin"){NavigationLink("أنواع الأخبار وصياغتها"){NewsTemplatesScreen()}}}.task{await load()}.onReceive(Timer.publish(every:30,on:.main,in:.common).autoconnect()){_ in Task{await load()}}}
  func load()async{if let raw=try? await api.action("news_request_action","meta")as? [String:Any]{meta=Item(raw)}}
 }
 struct RequestPreview:View {
@@ -329,6 +329,10 @@ struct NewNewsRequestScreen:View {
  @State private var newborn=""
  @State private var bride=""
  @State private var details=""
+ @State private var requestPhotos:[RequestPhoto]=[]
+ @State private var selectedRequestPhotos:[PhotosPickerItem]=[]
+ @State private var smartPhoto=true
+ @State private var processingPhotos=false
  @State private var requestID=UUID().uuidString
  @State private var notice=""
  @State private var error=""
@@ -343,15 +347,29 @@ struct NewNewsRequestScreen:View {
     if template.text("kind")=="newborn"{TextField("اسم المولود",text:$newborn)}
     if template.text("kind")=="marriage"{TextField("كريمة من · اسم والد العروس",text:$bride)}
     TextField("تفاصيل أخرى",text:$details,axis:.vertical).lineLimit(3...8)
+    Section("صور الخبر · حتى خمس صور") {
+     Toggle("القص الذكي حول الوجه",isOn:$smartPhoto).disabled(processingPhotos)
+     Text("يمكنك تعطيل القص لإبقاء الصورة كاملة. المعالجة داخل الجهاز، والمعاينة قبل الإرسال.").font(.caption)
+     if requestPhotos.count<5{PhotosPicker(selection:$selectedRequestPhotos,maxSelectionCount:5-requestPhotos.count,matching:.images){Label("إضافة صور للخبر",systemImage:"photo.on.rectangle")}.disabled(processingPhotos)}
+     if processingPhotos{ProgressView("تجهيز الصور…")}
+     ForEach(requestPhotos){p in VStack{if let image=UIImage(data:p.prepared){Image(uiImage:image).resizable().scaledToFit().frame(maxHeight:260)};Text(p.cropped ? "تم القص حول الوجه":"الصورة كاملة").font(.caption);Button("إزالة الصورة"){requestPhotos.removeAll{$0.id==p.id}}.disabled(processingPhotos)}}
+    }
     Section("معاينة الخبر"){RequestPreview(title:template.text("name"),text:renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]))}
     TaskButton(title:"إرسال الطلب للصحفيين والمدير",symbol:"paperplane") {
-     _ = try await api.action("news_request_action","submit",["request_id":requestID,"template":selected,"subject":subject,"newborn":newborn,"bride_father":bride,"details":details])
+     guard !processingPhotos else{throw FamilyError(text:"انتظر تجهيز الصور.")}
+     var paths:[String]=[]
+     do{for photo in requestPhotos{paths.append(try await api.upload(photo.prepared,bucket:"news-images",smartCrop:false))};_ = try await api.action("news_request_action","submit",["request_id":requestID,"template":selected,"subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"image_paths":paths,"smart_crop_enabled":smartPhoto])}catch{if !paths.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":paths])};throw error}
+     requestPhotos=[]
+
      notice="وصل طلبك للصحفيين ومدير العائلة.";requestID=UUID().uuidString;subject="";newborn="";bride="";details=""
-    }.disabled(api.readOnly || subject.trimmingCharacters(in:.whitespaces).isEmpty)
+    }.disabled(api.readOnly || processingPhotos || subject.trimmingCharacters(in:.whitespaces).isEmpty)
    }
    if !notice.isEmpty{Text(notice).foregroundStyle(brandBlue);NavigationLink("متابعة طلباتي"){NewsRequestsScreen(review:false)}}
-  }.navigationTitle("طلب نشر خبر").task{do{templates=Item.items(try await api.action("news_request_action","templates")).filter{$0.flag("enabled")};selected=templates.first?.id ?? ""}catch{self.error=api.errorText(error)}}
+  }.onChange(of:selectedRequestPhotos){_,items in Task{await addRequestPhotos(items)}}.onChange(of:smartPhoto){_,_ in Task{await reprocessRequestPhotos()}}.navigationTitle("طلب نشر خبر").task{do{templates=Item.items(try await api.action("news_request_action","templates")).filter{$0.flag("enabled")};selected=templates.first?.id ?? ""}catch{self.error=api.errorText(error)}}
  }
+ func addRequestPhotos(_ items:[PhotosPickerItem])async{guard !items.isEmpty,!processingPhotos else{return};processingPhotos=true;defer{processingPhotos=false;selectedRequestPhotos=[]};do{for item in items{guard requestPhotos.count<5,let data=try await item.loadTransferable(type:Data.self)else{continue};let result=try prepareSmartNewsPhoto(data,enabled:smartPhoto);requestPhotos.append(RequestPhoto(original:data,prepared:result.data,cropped:result.cropped));await Task.yield()}}catch{self.error=api.errorText(error)}}
+ func reprocessRequestPhotos()async{guard !processingPhotos else{return};processingPhotos=true;defer{processingPhotos=false};do{for i in requestPhotos.indices{let result=try prepareSmartNewsPhoto(requestPhotos[i].original,enabled:smartPhoto);requestPhotos[i].prepared=result.data;requestPhotos[i].cropped=result.cropped;await Task.yield()}}catch{self.error=api.errorText(error)}}
+
 }
 struct NewsRequestsScreen:View {
  @EnvironmentObject private var api:Backend
@@ -359,7 +377,7 @@ struct NewsRequestsScreen:View {
  @State private var rows:[Item]=[]
  @State private var error=""
  @State private var more=false
- var body:some View{List{LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:12){Text(r.text("title")).font(.headline);Text(r.text("requester_name")+" · "+newsRequestStatus(r.text("display_status"))).font(.caption);RequestPreview(title:r.text("title"),text:r.text("rendered_body"));if !r.text("review_note").isEmpty{Text("ملاحظة المراجع: "+r.text("review_note"))};if !r.text("post_id").isEmpty{NavigationLink("فتح الخبر"){PostDestination(postID:r.text("post_id"))}};if r.text("status")=="pending"{if review{NavigationLink("مراجعة واعتماد الخبر"){NewsRequestReviewScreen(request:r)}}else{TaskButton(title:"إلغاء الطلب",symbol:"xmark"){_ = try await api.action("news_request_action","cancel",["id":r.id]);await load(reset:true)}.disabled(api.readOnly)}}}};if more{TaskButton(title:"طلبات أقدم",symbol:"arrow.down"){await load(reset:false)}};if rows.isEmpty && error.isEmpty{Text("لا توجد طلبات.")}}.navigationTitle(review ? "مراجعة طلبات الأخبار":"طلبات أخباري").task{await load(reset:true)}.refreshable{await load(reset:true)}}
+ var body:some View{List{LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:12){Text(r.text("title")).font(.headline);Text(r.text("requester_name")+" · "+newsRequestStatus(r.text("display_status"))).font(.caption);RequestPreview(title:r.text("title"),text:r.text("rendered_body"));ForEach(r.raw["image_paths"]as? [String] ?? [],id:\.self){path in PrivateImage(path:path,bucket:"news-images").frame(height:220).clipped()};if !r.text("locked_name").isEmpty && dateValue(r.text("lock_expires_at"))>Date(){Text("الخبر تحت مراجعة العضو "+r.text("locked_name")).font(.caption).foregroundStyle(.orange)};if !r.text("reviewer_name").isEmpty{Text("راجعه / اعتمده: "+r.text("reviewer_name")+" · "+dateValue(r.text("reviewed_at")).formatted()).font(.caption)};if !r.text("review_note").isEmpty{Text("ملاحظة المراجع: "+r.text("review_note"))};if !r.text("post_id").isEmpty{NavigationLink("فتح الخبر"){PostDestination(postID:r.text("post_id"))}};if r.text("status")=="pending"{if review{NavigationLink("حجز ومراجعة الخبر"){NewsRequestReviewScreen(request:r)}.disabled(api.readOnly || (!api.admin && !r.text("locked_by").isEmpty && r.text("locked_by") != api.user.id && dateValue(r.text("lock_expires_at"))>Date()))}else{TaskButton(title:"إلغاء الطلب",symbol:"xmark"){_ = try await api.action("news_request_action","cancel",["id":r.id]);await load(reset:true)}.disabled(api.readOnly)}}}};if more{TaskButton(title:"طلبات أقدم",symbol:"arrow.down"){await load(reset:false)}};if rows.isEmpty && error.isEmpty{Text("لا توجد طلبات.")}}.navigationTitle(review ? "مراجعة طلبات الأخبار":"طلبات أخباري").task{await load(reset:true)}.refreshable{await load(reset:true)}}
  func load(reset:Bool)async{do{let result=Item.items(try await api.action("news_request_action","list",["review":review,"offset":reset ? 0:rows.count]));if reset{rows=result}else{rows += result};more=result.count==30;error=""}catch{self.error=api.errorText(error)}}
 }
 struct NewsRequestReviewScreen:View {
@@ -376,13 +394,19 @@ struct NewsRequestReviewScreen:View {
  @State private var publishedPost=""
  @State private var notice=""
  @State private var finished=false
+ @State private var claimed=false
+ @State private var lockError=""
  var body:some View {
   Form {
+   if !lockError.isEmpty{LoadError(text:lockError)}
    if finished{Text(notice);if !publishedPost.isEmpty{NavigationLink("فتح الخبر"){PostDestination(postID:publishedPost)}}}
    else {
     Text("طالب الخبر: "+request.text("requester_name"))
-    TextField("عنوان النشر",text:$title)
-    TextField("الصيغة النهائية",text:$text,axis:.vertical).lineLimit(6...16)
+    Text(claimed ? "الطلب محجوز لك. يتحرر بعد 15 دقيقة دون نشاط.":"جاري حجز المراجعة…").font(.caption).foregroundStyle(.orange)
+    ForEach(request.raw["image_paths"]as? [String] ?? [],id:\.self){path in PrivateImage(path:path,bucket:"news-images").frame(height:260).clipped()}
+    Text(request.flag("smart_crop_enabled") ? "القص الذكي مسموح من صاحب الطلب":"صاحب الطلب أوقف القص الذكي").font(.caption)
+    TextField("عنوان النشر",text:$title).disabled(!claimed)
+    TextField("الصيغة النهائية",text:$text,axis:.vertical).lineLimit(6...16).disabled(!claimed)
     RequestPreview(title:title,text:text)
     Toggle("منشن مباشر لطالب الخبر",isOn:$mentionRequester)
     Section("إضافة منشن لأعضاء العائلة") {
@@ -391,14 +415,19 @@ struct NewsRequestReviewScreen:View {
      ForEach(chosen){p in Button("✕ "+p.text("display_name")){chosen.removeAll{$0.id==p.id}}}
     }
     Text("تطبق موافقة المدير على أخبار الصحفي وفق إعدادات العائلة.").font(.caption).foregroundStyle(.secondary)
+    TaskButton(title:"حفظ مسودة المراجعة",symbol:"square.and.arrow.down"){_ = try await api.action("news_request_action","draft",reviewPayload());notice="حُفظت المسودة باسمك."}.disabled(api.readOnly || !claimed)
+    TaskButton(title:"ترك المراجعة وإتاحة الطلب",symbol:"lock.open"){_ = try await api.action("news_request_action","release",["id":request.id]);dismiss()}.disabled(!claimed)
     TaskButton(title:"اعتماد وإرسال للنشر",symbol:"checkmark") {
      let result=Item(try await api.action("news_request_action","approve",["id":request.id,"title":title,"body":text,"mention_requester":mentionRequester,"mentions":chosen.map{$0.id}])as? [String:Any] ?? [:])
      finished=true;publishedPost=result.flag("published") ? result.text("post_id"):"";notice=result.flag("published") ? "اعتمد الخبر ونُشر.":"وصل الخبر إلى المدير للموافقة النهائية."
-    }.disabled(api.readOnly)
-    Section("رفض الطلب") {TextField("سبب الرفض (اختياري)",text:$note);TaskButton(title:"رفض الطلب",symbol:"xmark"){_ = try await api.action("news_request_action","reject",["id":request.id,"note":note]);finished=true;notice="رُفض الطلب."}.disabled(api.readOnly)}
+    }.disabled(api.readOnly || !claimed)
+    Section("رفض الطلب") {TextField("سبب الرفض (اختياري)",text:$note);TaskButton(title:"رفض الطلب",symbol:"xmark"){_ = try await api.action("news_request_action","reject",["id":request.id,"note":note]);finished=true;notice="رُفض الطلب."}.disabled(api.readOnly || !claimed)}
    }
-  }.navigationTitle("اعتماد الخبر").onAppear{title=request.text("title");text=request.text("rendered_body")}.task(id:term){do{try await Task.sleep(nanoseconds:250_000_000);let query=term.hasPrefix("@") ? String(term.dropFirst()):term;if query.isEmpty{results=[];return};let rows=Item.items(try await api.action("news_request_action","mention_search",["term":query]));try Task.checkCancellation();results=rows}catch{}}
+  }.navigationTitle("مراجعة الخبر").task{await claimRequest()}.onReceive(Timer.publish(every:60,on:.main,in:.common).autoconnect()){_ in if claimed && !finished{Task{do{_ = try await api.action("news_request_action","renew",["id":request.id])}catch{claimed=false;lockError=api.errorText(error)}}}}.task(id:term){do{try await Task.sleep(nanoseconds:250_000_000);let query=term.hasPrefix("@") ? String(term.dropFirst()):term;if query.isEmpty{results=[];return};let rows=Item.items(try await api.action("news_request_action","mention_search",["term":query]));try Task.checkCancellation();results=rows}catch{}}
  }
+ func reviewPayload()->[String:Any]{["id":request.id,"title":title,"body":text,"mention_requester":mentionRequester,"mentions":chosen.map{$0.id}]}
+ func claimRequest()async{do{let response=Item(try await api.action("news_request_action","claim",["id":request.id])as? [String:Any] ?? [:]);let draft=response.child("review_draft");title=draft.text("title").isEmpty ? request.text("title"):draft.text("title");text=draft.text("body").isEmpty ? request.text("rendered_body"):draft.text("body");mentionRequester=draft.flag("mention_requester");if let ids=draft.raw["mentions"]as? [String],!ids.isEmpty{chosen=try await api.table("profiles",[q("select","id,display_name"),q("id","in.("+ids.joined(separator:",")+")")])};claimed=true;lockError=""}catch{claimed=false;lockError=api.errorText(error)}}
+
 }
 struct NewsTemplatesScreen:View {
  @EnvironmentObject private var api:Backend
@@ -453,4 +482,15 @@ struct TemplatePatternEditor:UIViewRepresentable {
   func textViewDidChange(_ view:UITextView){guard !updating else{return};parent.text=view.text;parent.selection=view.selectedRange}
   func textViewDidChangeSelection(_ view:UITextView){guard !updating else{return};if parent.selection != view.selectedRange{parent.selection=view.selectedRange}}
  }
+}
+
+struct RequestPhoto:Identifiable{let id=UUID().uuidString;let original:Data;var prepared:Data;var cropped:Bool}
+struct NewsRequestHistoryScreen:View {
+ @EnvironmentObject private var api:Backend
+ @State private var rows:[Item]=[]
+ @State private var more=false
+ @State private var error=""
+ let names=["submitted":"إرسال الطلب","claimed":"حجز المراجعة","manager_takeover":"تولي المراجعة بواسطة المدير","draft_saved":"حفظ مسودة","released":"ترك المراجعة","approved":"اعتماد الخبر","published":"نشر الخبر","published_legacy":"نشر سابق","sent_for_approval":"إرسال لموافقة المدير","rejected":"رفض الطلب","cancelled":"إلغاء الطلب"]
+ var body:some View{List{LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:8){Text(r.text("title")).font(.headline);Text((names[r.text("event")] ?? r.text("event"))+" · "+r.text("actor_name"));Text(dateValue(r.text("created_at")),format:.dateTime.year().month().day().hour().minute()).font(.caption);if !r.text("post_id").isEmpty{NavigationLink("فتح الخبر"){PostDestination(postID:r.text("post_id"))}}}};if more{TaskButton(title:"سجل أقدم",symbol:"arrow.down"){await load(reset:false)}}}.navigationTitle("سجل مراجعة واعتماد الأخبار").task{await load(reset:true)}.refreshable{await load(reset:true)}}
+ func load(reset:Bool)async{do{let result=Item.items(try await api.action("news_request_action","history",["offset":reset ? 0:rows.count]));if reset{rows=result}else{rows += result};more=result.count==50;error=""}catch{self.error=api.errorText(error)}}
 }

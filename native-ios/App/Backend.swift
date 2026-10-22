@@ -1,3 +1,4 @@
+import Vision
 import Foundation
 import SwiftUI
 import Security
@@ -111,8 +112,9 @@ enum CredentialStore {
     }
     func recover(email:String?=nil) async throws {_ = try await request("/auth/v1/recover?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email ?? user.text("email")],auth:false)}
     func signedData(bucket:String,path:String) async throws -> Data {guard !path.isEmpty else{throw FamilyError(text:"لا توجد صورة")};let safe=path.split(separator:"/").map{String($0).addingPercentEncoding(withAllowedCharacters:.urlPathAllowed)!}.joined(separator:"/");let out=Item(try await request("/storage/v1/object/sign/"+bucket+"/"+safe,method:"POST",body:["expiresIn":600]) as? [String:Any] ?? [:]);guard let url=URL(string:origin+"/storage/v1"+out.text("signedURL")),url.scheme=="https",url.host==URL(string:origin)?.host else{throw FamilyError(text:"تعذّر تحميل الصورة.")};return try await network.data(from:url).0}
-    func upload(_ original:Data,bucket:String,portrait:Bool=true,preserveAspect:Bool=false) async throws -> String {
-        guard original.count<=20*1024*1024,let image=UIImage(data:original) else{throw FamilyError(text:"اختر صورة أقل من 20 ميجابايت.")}
+    func upload(_ original:Data,bucket:String,portrait:Bool=true,preserveAspect:Bool=false,smartCrop:Bool=true) async throws -> String {
+        let source=(bucket=="news-images" && !preserveAspect && smartCrop) ? try prepareSmartNewsPhoto(original,enabled:true).data:original
+        guard original.count<=20*1024*1024,let image=UIImage(data:source) else{throw FamilyError(text:"اختر صورة أقل من 20 ميجابايت.")}
         var result:Data?
         for attempt in 0..<7 {let scale=pow(0.8,Double(attempt));let size=preserveAspect ? CGSize(width:image.size.width*min(1,1600/max(image.size.width,image.size.height))*scale,height:image.size.height*min(1,1600/max(image.size.width,image.size.height))*scale) : (portrait ? CGSize(width:1080*scale,height:1350*scale) : CGSize(width:512*scale,height:512*scale))
             let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true
@@ -198,4 +200,35 @@ enum FamilyTheme {
     static func update(_ family:Item){var palette=["123747","94763c"];if family.text("code")=="01" && family.text("logo").isEmpty{palette=["397b9c","ac508b"]}else if let data=Data(base64Encoded:family.text("logo").components(separatedBy:",").last ?? ""),let image=UIImage(data:data),let cg=image.cgImage{var bytes=[UInt8](repeating:0,count:64*64*4);if let ctx=CGContext(data:&bytes,width:64,height:64,bitsPerComponent:8,bytesPerRow:256,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue){ctx.draw(cg,in:CGRect(x:0,y:0,width:64,height:64));var bins:[Int:[Int]]=[:];for i in stride(from:0,to:bytes.count,by:4){let r=Int(bytes[i]),g=Int(bytes[i+1]),b=Int(bytes[i+2]);if bytes[i+3]<180 || max(r,g,b)-min(r,g,b)<30 || max(r,g,b)<35{continue};let key=(r/32)*64+(g/32)*8+b/32;var v=bins[key] ?? [0,0,0,0];v[0]+=r;v[1]+=g;v[2]+=b;v[3]+=1;bins[key]=v};let ranked=bins.values.sorted{$0[3]>$1[3]};let colors=ranked.map{v in [v[0]/v[3],v[1]/v[3],v[2]/v[3]]};if let first=colors.first{let second=colors.first{abs($0[0]-first[0])+abs($0[1]-first[1])+abs($0[2]-first[2])>150} ?? first;palette=[first,second].map{rgb in var c=rgb;while (Double(c[0])*0.2126+Double(c[1])*0.7152+Double(c[2])*0.0722)>115{c=c.map{Int(Double($0)*0.92)}};return c.map{String(format:"%02x",$0)}.joined()}}}}
         UserDefaults.standard.set(palette[0],forKey:"family-theme-primary");UserDefaults.standard.set(palette[1],forKey:"family-theme-accent")
     }
+}
+
+struct SmartNewsPhoto {let data:Data;let cropped:Bool}
+func newsFaceCrop(size:CGSize,faces:[CGRect])->CGRect? {
+ guard let first=faces.first else{return nil}
+ let union=faces.dropFirst().reduce(first){$0.union($1)}.intersection(CGRect(origin:.zero,size:size))
+ var width=max(union.width*1.9,union.height*2.5*0.8),height:CGFloat
+ height=width/0.8
+ if width>size.width || height>size.height{let scale=min(size.width/width,size.height/height);width *= scale;height *= scale}
+ guard width>=union.width*1.15,height>=union.height*1.25 else{return nil}
+ let x=max(0,min(size.width-width,union.midX-width/2)),y=max(0,min(size.height-height,union.minY-(height-union.height)*0.32))
+ let rect=CGRect(x:x,y:y,width:width,height:height)
+ return rect.contains(union) ? rect:nil
+}
+func prepareSmartNewsPhoto(_ data:Data,enabled:Bool)throws->SmartNewsPhoto {
+ guard data.count<=20*1024*1024,let original=UIImage(data:data)else{throw FamilyError(text:"اختر صورة أقل من 20 ميجابايت.")}
+ let factor=min(1,1600/max(original.size.width,original.size.height)),size=CGSize(width:original.size.width*factor,height:original.size.height*factor)
+ let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true
+ let upright=UIGraphicsImageRenderer(size:size,format:format).image{_ in UIColor.white.setFill();UIRectFill(CGRect(origin:.zero,size:size));original.draw(in:CGRect(origin:.zero,size:size))}
+ var crop:CGRect?
+ if enabled,let cg=upright.cgImage{let request=VNDetectFaceRectanglesRequest();do{try VNImageRequestHandler(cgImage:cg,options:[:]).perform([request]);let faces=(request.results ?? []).map{observation in let b=observation.boundingBox;return CGRect(x:b.minX*size.width,y:(1-b.maxY)*size.height,width:b.width*size.width,height:b.height*size.height)};crop=newsFaceCrop(size:size,faces:faces)}catch{}}
+ for attempt in 0..<7 {
+  let scale=pow(0.8,Double(attempt)),output=CGSize(width:1080*scale,height:1350*scale)
+  let rendered=UIGraphicsImageRenderer(size:output,format:format).image{context in
+   UIColor.white.setFill();context.fill(CGRect(origin:.zero,size:output))
+   if let crop{let factor=output.width/crop.width;upright.draw(in:CGRect(x:-crop.minX*factor,y:-crop.minY*factor,width:size.width*factor,height:size.height*factor))}
+   else{let factor=min(output.width/size.width,output.height/size.height);upright.draw(in:CGRect(x:(output.width-size.width*factor)/2,y:(output.height-size.height*factor)/2,width:size.width*factor,height:size.height*factor))}
+  }
+  if let jpeg=rendered.jpegData(compressionQuality:0.8-Double(attempt)*0.05),jpeg.count<=409600{return SmartNewsPhoto(data:jpeg,cropped:crop != nil)}
+ }
+ throw FamilyError(text:"تعذر ضغط الصورة.")
 }
