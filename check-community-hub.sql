@@ -1,0 +1,45 @@
+begin;
+create temp table follow_ids(kind text,id uuid);grant select on follow_ids to authenticated;
+insert into follow_ids values('tenant',gen_random_uuid()),('other_tenant',gen_random_uuid()),('writer',gen_random_uuid()),('subject',gen_random_uuid()),('fan',gen_random_uuid()),('outsider',gen_random_uuid()),('other_writer',gen_random_uuid());
+insert into family_private.tenants(id,code,name,status,contact_phone,contact_email,payment_status)select id,case kind when 'tenant'then 'FOLLOW-TEST'else 'FOLLOW-OTHER'end,'اختبار المتابعة','active','+966500007701',kind||'-follow@example.invalid','waived'from follow_ids where kind in('tenant','other_tenant');
+select set_config('request.jwt.claim.sub',(select user_id::text from family_private.platform_admins limit 1),true);
+select public.platform_action('save',jsonb_build_object('id',id,'status','active','payment_status','waived'))from follow_ids where kind in('tenant','other_tenant');
+insert into auth.users(id,aud,role,email,email_confirmed_at,raw_user_meta_data)select id,'authenticated','authenticated',kind||'-follow@example.invalid',now(),jsonb_build_object('family_code',case kind when 'outsider'then 'FOLLOW-OTHER'else 'FOLLOW-TEST'end,'full_name',kind||' احمد حسن اختبار','display_name',kind||' احمد حسن اختبار','gender','male','phone',case kind when 'writer'then '+966500007701'when 'subject'then '+966500007702'when 'fan'then '+966500007703'when 'other_writer'then '+966500007705'else '+966500007704'end)from follow_ids where kind in('writer','subject','fan','outsider','other_writer');
+update public.profiles set status='active',role=case when id in(select id from follow_ids where kind in('writer','other_writer'))then 'admin'else 'member'end where id in(select id from follow_ids);
+update public.family_settings set journalist_approval=false where tenant_id=(select id from follow_ids where kind='tenant');
+
+
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='writer'),true);
+set local role authenticated;
+select public.community_hub('roles',jsonb_build_object('member',(select id from follow_ids where kind='subject'),'roles',jsonb_build_array('journalist','auditor')));
+reset role;
+update public.profiles set status='pending'where id=(select id from follow_ids where kind='fan');
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='subject'),true);
+set local role authenticated;
+do $$declare x jsonb;begin x:=public.community_hub('self');if not (x->>'reviewer')::boolean or not x->'roles' @> '["journalist","auditor"]'::jsonb then raise exception 'MULTI_ROLE_FAIL';end if;
+if jsonb_array_length(public.community_hub('pending'))<>1 then raise exception 'QUEUE_FAIL';end if;
+perform public.community_hub('activate',jsonb_build_object('member',(select id from follow_ids where kind='fan')));
+begin perform public.community_hub('roles',jsonb_build_object('member',(select id from follow_ids where kind='fan'),'roles',jsonb_build_array('admin')));raise exception 'AUDITOR_ESCALATED';exception when raise_exception then if sqlerrm='AUDITOR_ESCALATED'then raise;end if;end;
+perform public.community_hub('birth_save','{"birth_date":"1990-01-02","visible":false}');
+perform public.community_hub('publish','{"body":"نقاش تجريبي ❤️"}');end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='fan'),true);
+set local role authenticated;
+do $$declare x jsonb;pid bigint;begin
+x:=public.member_social('profile',jsonb_build_object('member',(select id from follow_ids where kind='subject')));if x->>'birth_date'is not null then raise exception 'BIRTH_LEAK';end if;
+x:=public.community_hub('feed');pid:=(x->0->>'id')::bigint;
+perform public.community_hub('comment',jsonb_build_object('post',pid,'body','تعليق عضو'));
+perform public.community_hub('react',jsonb_build_object('post',pid,'emoji','❤️'));
+x:=public.community_hub('feed');if(x->0->>'comments')::int<>1 or(x->0->'reactions'->>'❤️')::int<>1 then raise exception 'FORUM_FAIL';end if;
+begin perform public.community_hub('pending');raise exception 'MEMBER_REVIEWED';exception when raise_exception then if sqlerrm='MEMBER_REVIEWED'then raise;end if;end;
+end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='outsider'),true);
+set local role authenticated;
+do $$begin if jsonb_array_length(public.community_hub('feed'))<>0 then raise exception 'CROSS_TENANT_FEED';end if;if jsonb_array_length(public.community_hub('search','{"term":"subject"}'))<>0 then raise exception 'CROSS_TENANT_SEARCH';end if;end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='writer'),true);
+set local role authenticated;
+do $$declare x jsonb;begin x:=public.community_hub('details',jsonb_build_object('member',(select id from follow_ids where kind='subject')));if x->>'birth_date'<>'1990-01-02'then raise exception 'MANAGER_BIRTH_FAIL';end if;perform public.community_hub('enable','{"enabled":false}');begin perform public.community_hub('feed');raise exception 'DISABLED_FEED';exception when raise_exception then if sqlerrm='DISABLED_FEED'then raise;end if;end;end$$;
+select 'PASS multi roles, auditor activation, birthday privacy, forum comments/reactions, tenant isolation, disabling square' result;
+rollback;
