@@ -313,7 +313,7 @@ func newsRequestStatus(_ value:String)->String {return ["pending":"بانتظا�
 struct NewsRequestMenu:View {
  @EnvironmentObject private var api:Backend
  @State private var meta=Item()
- var body:some View{Section("طلبات الأخبار"){NavigationLink("طلب نشر خبر"){NewNewsRequestScreen()};NavigationLink("طلبات أخباري"){NewsRequestsScreen(review:false)};if meta.flag("writer"){NavigationLink("مراجعة طلبات الأخبار · \(meta.number("pending"))"){NewsRequestsScreen(review:true)}};if meta.flag("admin"){NavigationLink("أنواع الأخبار والصيغ الجاهزة"){NewsTemplatesScreen()}}}.task{await load()}.onReceive(Timer.publish(every:30,on:.main,in:.common).autoconnect()){_ in Task{await load()}}}
+ var body:some View{Section("طلبات الأخبار"){NavigationLink("طلب نشر خبر"){NewNewsRequestScreen()};NavigationLink("طلبات أخباري"){NewsRequestsScreen(review:false)};if meta.flag("writer"){NavigationLink("مراجعة طلبات الأخبار · \(meta.number("pending"))"){NewsRequestsScreen(review:true)}};if meta.flag("admin"){NavigationLink("أنواع الأخبار وصياغتها"){NewsTemplatesScreen()}}}.task{await load()}.onReceive(Timer.publish(every:30,on:.main,in:.common).autoconnect()){_ in Task{await load()}}}
  func load()async{if let raw=try? await api.action("news_request_action","meta")as? [String:Any]{meta=Item(raw)}}
 }
 struct RequestPreview:View {
@@ -405,7 +405,7 @@ struct NewsTemplatesScreen:View {
  @State private var rows:[Item]=[]
  @State private var error=""
  @State private var editing:Item?
- var body:some View{List{LoadError(text:error);Button("إضافة نوع خبر وصيغة"){editing=Item(["id":"new"])};ForEach(rows){t in Button{editing=t}label:{VStack(alignment:.leading,spacing:8){Text(t.text("name")+(t.flag("enabled") ? "":" · موقوف")).font(.headline);Text(t.text("body")).font(.caption)}}}}.navigationTitle("أنواع الأخبار والصيغ").task{await load()}.sheet(item:$editing){t in NavigationStack{NewsTemplateEditor(template:t){await load()}}}}
+ var body:some View{List{LoadError(text:error);Button("＋ إضافة نوع خبر وصياغته"){editing=Item(["id":"new"])};ForEach(rows){t in Button{editing=t}label:{VStack(alignment:.leading,spacing:8){Text(t.text("name")+(t.flag("enabled") ? "":" · موقوف")).font(.headline);Text(t.text("body")).font(.caption)}}}}.navigationTitle("أنواع الأخبار والصيغ").task{await load()}.sheet(item:$editing){t in NavigationStack{NewsTemplateEditor(template:t){await load()}}}}
  func load()async{do{rows=Item.items(try await api.action("news_request_action","templates"));error=""}catch{self.error=api.errorText(error)}}
 }
 struct NewsTemplateEditor:View {
@@ -416,23 +416,41 @@ struct NewsTemplateEditor:View {
  @State private var name=""
  @State private var kind="general"
  @State private var pattern=""
+ @State private var templateSelection=NSRange(location:0,length:0)
  @State private var enabled=true
  let fields=[("subject","اسم صاحب الخبر"),("newborn","اسم المولود"),("bride_father","كريمة من"),("details","تفاصيل أخرى"),("requester","اسم طالب الخبر")]
  var body:some View {
   Form {
-   TextField("عنوان الخبر بالقائمة",text:$name)
+   TextField("١. اسم نوع الخبر الظاهر بالقائمة",text:$name)
    Picker("نوع الخبر",selection:$kind){Text("عام").tag("general");Text("مولود جديد").tag("newborn");Text("عقد قران").tag("marriage")}
-   Text("اكتب الصيغة وضع الحقول بين الأقواس في المواقع المطلوبة. أزرار الإدراج تضيف الحقل في نهاية النص ويمكن نقله.").font(.caption)
-   TextField("صيغة الخبر",text:$pattern,axis:.vertical).lineLimit(6...16)
-   ForEach(fields,id:\.0){key,label in Button("إدراج "+label){pattern += "{"+key+"}"}}
+   Text("٢. اكتب الصيغة واضغط موضع ظهور بيانات الطلب، ثم اختر الحقل أدناه لإدراجه في نفس المكان.").font(.subheadline)
+   TemplatePatternEditor(text:$pattern,selection:$templateSelection).frame(minHeight:190).accessibilityLabel("صياغة الخبر وتحديد مواضع البيانات")
+   Section("٣. إدراج بيانات الطلب عند المؤشر"){ForEach(fields,id:\.0){key,label in Button("＋ "+label){insertField(key)}}}
    Toggle("إتاحة النوع للأعضاء",isOn:$enabled)
    RequestPreview(title:name,text:renderRequestedNews(pattern,["subject":"أحمد علي","newborn":"علي","bride_father":"محمد حسن","details":"تفاصيل الخبر هنا","requester":"طالب الخبر"]))
-   TaskButton(title:"حفظ النوع والصيغة",symbol:"checkmark") {
+   TaskButton(title:"حفظ وإضافة النوع لقائمة الأخبار",symbol:"checkmark") {
     var payload:[String:Any]=["name":name,"kind":kind,"body":pattern,"enabled":enabled]
     if template.id != "new"{payload["id"]=template.id}
     _ = try await api.action("news_request_action","template_save",payload)
     await saved();dismiss()
    }.disabled(api.readOnly)
-  }.navigationTitle("صيغة الخبر").toolbar{Button("إغلاق"){dismiss()}}.onAppear{name=template.text("name");kind=template.text("kind").isEmpty ? "general":template.text("kind");pattern=template.text("body").isEmpty ? "تتقدم العائلة بالتهنئة إلى {subject}\n{details}":template.text("body");enabled=template.id=="new" || template.flag("enabled")}
+  }.navigationTitle("نوع الخبر وصياغته").toolbar{Button("إغلاق"){dismiss()}}.onAppear{name=template.text("name");kind=template.text("kind").isEmpty ? "general":template.text("kind");pattern=template.text("body").isEmpty ? "تتقدم العائلة بالتهنئة إلى {subject}\n{details}":template.text("body");enabled=template.id=="new" || template.flag("enabled")}
+ }
+ func insertField(_ key:String){let value=NSMutableString(string:pattern);let start=min(max(0,templateSelection.location),value.length);let length=min(max(0,templateSelection.length),value.length-start);let token="{"+key+"}";value.replaceCharacters(in:NSRange(location:start,length:length),with:token);pattern=value as String;templateSelection=NSRange(location:start+(token as NSString).length,length:0)}
+
+}
+
+struct TemplatePatternEditor:UIViewRepresentable {
+ @Binding var text:String
+ @Binding var selection:NSRange
+ func makeCoordinator()->Coordinator{Coordinator(self)}
+ func makeUIView(context:Context)->UITextView{let view=UITextView();view.font=UIFont.preferredFont(forTextStyle:.body);view.adjustsFontForContentSizeCategory=true;view.backgroundColor=UIColor.secondarySystemBackground;view.layer.cornerRadius=12;view.textContainerInset=UIEdgeInsets(top:12,left:12,bottom:12,right:12);view.textAlignment = .right;view.delegate=context.coordinator;return view}
+ func updateUIView(_ view:UITextView,context:Context){context.coordinator.updating=true;defer{context.coordinator.updating=false};context.coordinator.parent=self;if view.text != text{view.text=text};let start=min(max(0,selection.location),(text as NSString).length);let length=min(max(0,selection.length),(text as NSString).length-start);let range=NSRange(location:start,length:length);if view.selectedRange != range{view.selectedRange=range}}
+ class Coordinator:NSObject,UITextViewDelegate {
+  var parent:TemplatePatternEditor
+  var updating=false
+  init(_ parent:TemplatePatternEditor){self.parent=parent}
+  func textViewDidChange(_ view:UITextView){guard !updating else{return};parent.text=view.text;parent.selection=view.selectedRange}
+  func textViewDidChangeSelection(_ view:UITextView){guard !updating else{return};if parent.selection != view.selectedRange{parent.selection=view.selectedRange}}
  }
 }
