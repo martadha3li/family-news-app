@@ -1,0 +1,38 @@
+begin;
+alter table family_private.news_requests add column artwork_only boolean not null default false,add column artwork_face jsonb;
+alter table public.posts add column artwork_only boolean not null default false,add column artwork_face jsonb;
+alter table family_private.news_templates drop constraint news_template_artwork;
+alter table public.posts drop constraint news_artwork_valid;
+alter table family_private.news_templates add constraint news_template_artwork check(artwork_key is null or artwork_key in('urgent','promotion','achievement','death','graduation','newborn','quran','quran-qr','hospital','recovery','family','mansoura','marriage','icu','honor','ramadan','wedding','job','funeral'));
+alter table public.posts add constraint news_artwork_valid check(news_artwork is null or news_artwork in('urgent','promotion','achievement','death','graduation','newborn','quran','quran-qr','hospital','recovery','family','mansoura','marriage','icu','honor','ramadan','wedding','job','funeral'));
+create function family_private.valid_artwork_face(f jsonb)returns boolean language plpgsql immutable set search_path='' as $$declare x numeric;y numeric;w numeric;h numeric;begin if f is null or f='null'then return true;end if;if jsonb_typeof(f)<>'object'or(select count(*)from jsonb_object_keys(f))<>4 or not f ?& array['x','y','width','height']then return false;end if;x:=(f->>'x')::numeric;y:=(f->>'y')::numeric;w:=(f->>'width')::numeric;h:=(f->>'height')::numeric;return coalesce(x>=0 and y>=0 and w>0 and h>0 and x+w<=1.001 and y+h<=1.001,false);exception when others then return false;end$$;
+revoke all on function family_private.valid_artwork_face(jsonb)from public,anon;grant execute on function family_private.valid_artwork_face(jsonb)to authenticated;
+alter table public.posts add constraint valid_artwork_face check(family_private.valid_artwork_face(artwork_face));
+alter table family_private.news_requests add constraint valid_request_artwork_face check(family_private.valid_artwork_face(artwork_face));
+-- Extend type lookup and template validation without changing authorization.
+do $$declare def text;begin
+select pg_get_functiondef('family_private.artwork_key(text)'::regprocedure)into def;
+def:=replace(def,'else null end',E'when family_private.normalize_name(label)like ''خبر عائل%''then ''family''when family_private.normalize_name(label)like ''اخبار المنصورة%''then ''mansoura''when family_private.normalize_name(label)like ''عقد قران%''or family_private.normalize_name(label)like ''عقد زواج%''then ''marriage''when family_private.normalize_name(label)like ''في العناية%''or family_private.normalize_name(label)like ''العناية%''then ''icu''when family_private.normalize_name(label)like ''تكريم%''then ''honor''when family_private.normalize_name(label)like ''%رمضان%''then ''ramadan''when family_private.normalize_name(label)like ''حفل زفاف%''then ''wedding''when family_private.normalize_name(label)like ''وظيف%''then ''job''when family_private.normalize_name(label)like ''وقت التشييع%''or family_private.normalize_name(label)like ''التشييع%''then ''funeral''else null end');execute def;
+select pg_get_functiondef('family_private.news_request_action(text,jsonb)'::regprocedure)into def;
+def:=replace(def,'''hospital'',''recovery'')','''hospital'',''recovery'',''family'',''mansoura'',''marriage'',''icu'',''honor'',''ramadan'',''wedding'',''job'',''funeral'')');execute def;end$$;
+alter function family_private.news_request_action(text,jsonb)rename to news_request_artwork_base;
+revoke all on function family_private.news_request_artwork_base(text,jsonb)from public,anon,authenticated;
+create function family_private.news_request_action(action text,payload jsonb default '{}')returns jsonb language plpgsql security definer set search_path='' as $$declare result jsonb;face jsonb:=nullif(payload->'artwork_face','null');tid uuid:=family_private.current_tenant();begin
+if action='submit'and not family_private.valid_artwork_face(face)then raise exception 'اختيار وجه غير صالح';end if;
+result:=family_private.news_request_artwork_base(action,payload);
+if action='submit'then update family_private.news_requests set artwork_only=coalesce((payload->>'artwork_only')::boolean,false),artwork_face=case when cardinality(image_paths)>0 then face else null end where id=(result#>>'{}')::uuid and tenant_id=tid and requester_id=auth.uid()and status='pending';
+elsif action='list'then select coalesce(jsonb_agg(v||jsonb_build_object('artwork_only',r.artwork_only,'artwork_face',r.artwork_face)),'[]')into result from jsonb_array_elements(result)v join family_private.news_requests r on r.id=(v->>'id')::uuid and r.tenant_id=tid;end if;return result;end$$;
+revoke all on function family_private.news_request_action(text,jsonb)from public,anon;grant execute on function family_private.news_request_action(text,jsonb)to authenticated;
+create or replace function public.news_request_action(action text,payload jsonb default '{}')returns jsonb language sql security invoker set search_path='' as $$select family_private.news_request_action(action,payload)$$;
+create function family_private.stamp_news_presentation()returns trigger language plpgsql security definer set search_path='' as $$begin
+if new.source_request_id is not null then select r.artwork_only,r.artwork_face into new.artwork_only,new.artwork_face from family_private.news_requests r where r.id=new.source_request_id and r.tenant_id=new.tenant_id;
+elsif TG_OP='UPDATE'and new.image_paths[1]is distinct from old.image_paths[1]and new.artwork_face is not distinct from old.artwork_face then new.artwork_face:=null;end if;
+new.artwork_only:=coalesce(new.artwork_only,false)and new.news_artwork is not null;if cardinality(new.image_paths)=0 then new.artwork_face:=null;end if;return new;end$$;
+revoke all on function family_private.stamp_news_presentation()from public,anon,authenticated;
+create trigger c_stamp_news_presentation before insert or update on public.posts for each row execute function family_private.stamp_news_presentation();
+do $$declare tid uuid;v record;existing uuid;begin select id into tid from family_private.tenants where code='01';if tid is null then return;end if;
+for v in select * from(values('خبر عائلي','family','general','{subject}\n{details}'),('أخبار المنصورة','mansoura','general','{subject}\n{details}'),('عقد قران','marriage','marriage','نبارك إلى {subject} عقد قرانه على كريمة {bride_father}.\n{details}'),('في العناية المركزة','icu','general','يرقد {subject} في العناية المركزة.\n{details}\nنسأل الله له الشفاء والعافية.'),('تكريم','honor','general','نبارك إلى {subject} هذا التكريم.\n{details}'),('مسابقة أخبار العائلة الرمضانية 1447هـ','ramadan','general','{subject}\n{details}'),('حفل زفاف','wedding','general','تبارك العائلة إلى {subject} بمناسبة حفل الزفاف.\n{details}'),('وظيفة','job','general','نبارك إلى {subject} بمناسبة الوظيفة.\n{details}'),('وقت التشييع','funeral','general','{subject}\n{details}'))as seeds(name,key,kind,body)loop
+select id into existing from family_private.news_templates t where t.tenant_id=tid and(family_private.normalize_name(t.name)=family_private.normalize_name(v.name)or t.artwork_key=v.key)order by updated_at desc limit 1;
+if existing is null then insert into family_private.news_templates(tenant_id,name,kind,body,artwork_key)values(tid,v.name,v.kind,replace(v.body,'\n',chr(10)),v.key);else update family_private.news_templates set artwork_key=v.key where id=existing;end if;end loop;
+update family_private.news_templates set artwork_key=family_private.artwork_key(name)where tenant_id=tid and artwork_key is null and family_private.artwork_key(name)is not null;end$$;
+notify pgrst,'reload schema';commit;

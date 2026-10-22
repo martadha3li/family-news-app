@@ -215,13 +215,14 @@ func newsFaceCrop(size:CGSize,faces:[CGRect])->CGRect? {
  let rect=CGRect(x:x,y:y,width:width,height:height)
  return rect.contains(union) ? rect:nil
 }
-func prepareSmartNewsPhoto(_ data:Data,enabled:Bool)throws->SmartNewsPhoto {
+func prepareSmartNewsPhoto(_ data:Data,enabled:Bool,selectedFace:CGRect?=nil)throws->SmartNewsPhoto {
  guard data.count<=20*1024*1024,let original=UIImage(data:data)else{throw FamilyError(text:"اختر صورة أقل من 20 ميجابايت.")}
  let factor=min(1,1600/max(original.size.width,original.size.height)),size=CGSize(width:original.size.width*factor,height:original.size.height*factor)
  let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true
  let upright=UIGraphicsImageRenderer(size:size,format:format).image{_ in UIColor.white.setFill();UIRectFill(CGRect(origin:.zero,size:size));original.draw(in:CGRect(origin:.zero,size:size))}
  var crop:CGRect?
- if enabled,let cg=upright.cgImage{let request=VNDetectFaceRectanglesRequest();do{try VNImageRequestHandler(cgImage:cg,options:[:]).perform([request]);let faces=(request.results ?? []).map{observation in let b=observation.boundingBox;return CGRect(x:b.minX*size.width,y:(1-b.maxY)*size.height,width:b.width*size.width,height:b.height*size.height)};crop=newsFaceCrop(size:size,faces:faces)}catch{}}
+ if enabled,let selectedFace{crop=newsFaceCrop(size:size,faces:[CGRect(x:selectedFace.minX*size.width,y:selectedFace.minY*size.height,width:selectedFace.width*size.width,height:selectedFace.height*size.height)])}
+ else if enabled,let cg=upright.cgImage{let request=VNDetectFaceRectanglesRequest();do{try VNImageRequestHandler(cgImage:cg,options:[:]).perform([request]);let faces=(request.results ?? []).map{observation in let b=observation.boundingBox;return CGRect(x:b.minX*size.width,y:(1-b.maxY)*size.height,width:b.width*size.width,height:b.height*size.height)};crop=newsFaceCrop(size:size,faces:faces)}catch{}}
  for attempt in 0..<7 {
   let scale=pow(0.8,Double(attempt)),output=CGSize(width:1080*scale,height:1350*scale)
   let rendered=UIGraphicsImageRenderer(size:output,format:format).image{context in
@@ -233,3 +234,9 @@ func prepareSmartNewsPhoto(_ data:Data,enabled:Bool)throws->SmartNewsPhoto {
  }
  throw FamilyError(text:"تعذر ضغط الصورة.")
 }
+
+func normalizedNewsFaces(_ data:Data)->[CGRect]{
+ guard let image=UIImage(data:data)else{return []};let factor=min(1,640/max(image.size.width,image.size.height)),size=CGSize(width:image.size.width*factor,height:image.size.height*factor);let f=UIGraphicsImageRendererFormat();f.scale=1;let upright=UIGraphicsImageRenderer(size:size,format:f).image{_ in image.draw(in:CGRect(origin:.zero,size:size))};guard let cg=upright.cgImage else{return []};let request=VNDetectFaceRectanglesRequest();do{try VNImageRequestHandler(cgImage:cg,options:[:]).perform([request]);return(request.results ?? []).prefix(20).map{o in let b=o.boundingBox;return CGRect(x:b.minX,y:1-b.maxY,width:b.width,height:b.height)}}catch{return []}
+}
+func faceDictionary(_ face:CGRect?)->Any{guard let face else{return NSNull()};return ["x":face.minX,"y":face.minY,"width":face.width,"height":face.height]}
+func faceRectangle(_ item:Item)->CGRect?{let f=item.child("artwork_face");guard let x=f.raw["x"]as? Double,let y=f.raw["y"]as? Double,let w=f.raw["width"]as? Double,let h=f.raw["height"]as? Double,w>0,h>0 else{return nil};return CGRect(x:x,y:y,width:w,height:h)}

@@ -2,7 +2,7 @@ import {artworkKey,newsArtworkCanvas} from './news-artwork.mjs';
 export function imagePaths(post){const paths=Array.isArray(post.image_paths)&&post.image_paths.length?post.image_paths:(post.image_path?[post.image_path]:[]);return paths.filter(p=>typeof p==='string'&&p).slice(0,5);}
 export async function renderAlbum(post,signedImage){
  const paths=imagePaths(post);let artwork=null;if(artworkKey(post))try{artwork=await newsArtworkCanvas(post,{signedImage})}catch{}if(artwork)paths.unshift(null);if(!paths.length)return null;
- const album=document.createElement('div');album.className='news-album';album.setAttribute('role','region');album.setAttribute('aria-label','صور الخبر');
+ const album=document.createElement('div');album.className='news-album';album.dataset.artworkComplete=String(!!artwork&&!artwork.artworkTruncated);album.setAttribute('role','region');album.setAttribute('aria-label','صور الخبر');
  const track=document.createElement('div');track.className='album-track';track.dir='ltr';track.tabIndex=0;album.append(track);
  const count=document.createElement('span');count.className='album-count';count.setAttribute('aria-live','polite');
  const dots=document.createElement('div');dots.className='album-dots';let current=0;

@@ -333,6 +333,7 @@ struct NewNewsRequestScreen:View {
  @State private var requestPhotos:[RequestPhoto]=[]
  @State private var selectedRequestPhotos:[PhotosPickerItem]=[]
  @State private var smartPhoto=true
+ @State private var artworkOnly=false
  @State private var processingPhotos=false
  @State private var requestID=UUID().uuidString
  @State private var notice=""
@@ -347,19 +348,19 @@ struct NewNewsRequestScreen:View {
     TextField("اسم صاحب الخبر · المعني بالخبر",text:$subject)
     if template.text("kind")=="newborn"{TextField("اسم المولود",text:$newborn)}
     if template.text("kind")=="marriage"{TextField("كريمة من · اسم والد العروس",text:$bride)}
-    TextField("تفاصيل أخرى",text:$details,axis:.vertical).lineLimit(3...8)
+    TextField("تفاصيل أخرى",text:$details,axis:.vertical).lineLimit(3...8);if !template.text("artwork_key").isEmpty{Toggle("الاكتفاء بالنص داخل صورة الخلفية",isOn:$artworkOnly)}
     Section("صور الخبر · حتى خمس صور") {
      Toggle("القص الذكي حول الوجه",isOn:$smartPhoto).disabled(processingPhotos)
      Text("يمكنك تعطيل القص لإبقاء الصورة كاملة. المعالجة داخل الجهاز، والمعاينة قبل الإرسال.").font(.caption)
      if requestPhotos.count<5{PhotosPicker(selection:$selectedRequestPhotos,maxSelectionCount:5-requestPhotos.count,matching:.images){Label("إضافة صور للخبر",systemImage:"photo.on.rectangle")}.disabled(processingPhotos)}
      if processingPhotos{ProgressView("تجهيز الصور…")}
-     ForEach(requestPhotos){p in VStack{if let image=UIImage(data:p.prepared){Image(uiImage:image).resizable().scaledToFit().frame(maxHeight:260)};Text(p.cropped ? "تم القص حول الوجه":"الصورة كاملة").font(.caption);Button("إزالة الصورة"){requestPhotos.removeAll{$0.id==p.id}}.disabled(processingPhotos)}}
+     ForEach(requestPhotos){p in VStack{if p.id==requestPhotos.first?.id && smartPhoto{NativeFacePicker(data:p.original,selected:Binding(get:{requestPhotos.first?.selectedFace},set:{face in if !requestPhotos.isEmpty{requestPhotos[0].selectedFace=face;Task{await reprocessRequestPhotos()}}}))};if let image=UIImage(data:p.prepared){Image(uiImage:image).resizable().scaledToFit().frame(maxHeight:260)};Text(p.cropped ? "تم القص حول الوجه":"الصورة كاملة").font(.caption);Button("إزالة الصورة"){requestPhotos.removeAll{$0.id==p.id}}.disabled(processingPhotos)}}
     }
-    Section("معاينة الخبر"){RequestPreview(title:template.text("name"),text:renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]));NewsArtworkPreview(post:Item(["news_artwork":template.text("artwork_key"),"title":template.text("name"),"body":renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]),"artwork_smart_crop":smartPhoto]),photo:requestPhotos.first.flatMap{UIImage(data:$0.original)})}
+    Section("معاينة الخبر"){RequestPreview(title:template.text("name"),text:renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]));NewsArtworkPreview(post:Item(["news_artwork":template.text("artwork_key"),"title":template.text("name"),"body":renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]),"artwork_smart_crop":smartPhoto,"artwork_only":artworkOnly,"artwork_face":faceDictionary(requestPhotos.first?.selectedFace)]),photo:requestPhotos.first.flatMap{UIImage(data:$0.original)})}
     TaskButton(title:"إرسال الطلب للصحفيين والمدير",symbol:"paperplane") {
-     guard !processingPhotos else{throw FamilyError(text:"انتظر تجهيز الصور.")}
+     guard !processingPhotos else{throw FamilyError(text:"انتظر تجهيز الصور.")};if smartPhoto,let first=requestPhotos.first,first.faces.count>1,first.selectedFace==nil{throw FamilyError(text:"اختر وجه الشخص المقصود أو أوقف القص الذكي.")}
      var paths:[String]=[]
-     do{for photo in requestPhotos{paths.append(try await api.upload(photo.original,bucket:"news-images",preserveAspect:true,smartCrop:false))};_ = try await api.action("news_request_action","submit",["request_id":requestID,"template":selected,"subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"image_paths":paths,"smart_crop_enabled":smartPhoto])}catch{if !paths.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":paths])};throw error}
+     do{for photo in requestPhotos{paths.append(try await api.upload(photo.original,bucket:"news-images",preserveAspect:true,smartCrop:false))};_ = try await api.action("news_request_action","submit",["request_id":requestID,"template":selected,"subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"image_paths":paths,"smart_crop_enabled":smartPhoto,"artwork_only":artworkOnly,"artwork_face":faceDictionary(requestPhotos.first?.selectedFace)])}catch{if !paths.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":paths])};throw error}
      requestPhotos=[]
 
      notice="وصل طلبك للصحفيين ومدير العائلة.";requestID=UUID().uuidString;subject="";newborn="";bride="";details=""
@@ -368,8 +369,8 @@ struct NewNewsRequestScreen:View {
    if !notice.isEmpty{Text(notice).foregroundStyle(brandBlue);NavigationLink("متابعة طلباتي"){NewsRequestsScreen(review:false)}}
   }.onChange(of:selectedRequestPhotos){_,items in Task{await addRequestPhotos(items)}}.onChange(of:smartPhoto){_,_ in Task{await reprocessRequestPhotos()}}.navigationTitle("طلب نشر خبر").task{do{templates=Item.items(try await api.action("news_request_action","templates")).filter{$0.flag("enabled")};selected=templates.first?.id ?? ""}catch{self.error=api.errorText(error)}}
  }
- func addRequestPhotos(_ items:[PhotosPickerItem])async{guard !items.isEmpty,!processingPhotos else{return};processingPhotos=true;defer{processingPhotos=false;selectedRequestPhotos=[]};do{for item in items{guard requestPhotos.count<5,let data=try await item.loadTransferable(type:Data.self)else{continue};let result=try prepareSmartNewsPhoto(data,enabled:smartPhoto);requestPhotos.append(RequestPhoto(original:data,prepared:result.data,cropped:result.cropped));await Task.yield()}}catch{self.error=api.errorText(error)}}
- func reprocessRequestPhotos()async{guard !processingPhotos else{return};processingPhotos=true;defer{processingPhotos=false};do{for i in requestPhotos.indices{let result=try prepareSmartNewsPhoto(requestPhotos[i].original,enabled:smartPhoto);requestPhotos[i].prepared=result.data;requestPhotos[i].cropped=result.cropped;await Task.yield()}}catch{self.error=api.errorText(error)}}
+ func addRequestPhotos(_ items:[PhotosPickerItem])async{guard !items.isEmpty,!processingPhotos else{return};processingPhotos=true;defer{processingPhotos=false;selectedRequestPhotos=[]};do{for item in items{guard requestPhotos.count<5,let data=try await item.loadTransferable(type:Data.self)else{continue};let result=try prepareSmartNewsPhoto(data,enabled:smartPhoto);requestPhotos.append(RequestPhoto(original:data,prepared:result.data,cropped:result.cropped,faces:normalizedNewsFaces(data)));await Task.yield()}}catch{self.error=api.errorText(error)}}
+ func reprocessRequestPhotos()async{guard !processingPhotos else{return};processingPhotos=true;defer{processingPhotos=false};do{for i in requestPhotos.indices{let result=try prepareSmartNewsPhoto(requestPhotos[i].original,enabled:smartPhoto,selectedFace:requestPhotos[i].selectedFace);requestPhotos[i].prepared=result.data;requestPhotos[i].cropped=result.cropped;await Task.yield()}}catch{self.error=api.errorText(error)}}
 
 }
 struct NewsRequestsScreen:View {
@@ -486,7 +487,7 @@ struct TemplatePatternEditor:UIViewRepresentable {
  }
 }
 
-struct RequestPhoto:Identifiable{let id=UUID().uuidString;let original:Data;var prepared:Data;var cropped:Bool}
+struct RequestPhoto:Identifiable{let id=UUID().uuidString;let original:Data;var prepared:Data;var cropped:Bool;var faces:[CGRect]=[];var selectedFace:CGRect?=nil}
 struct NewsRequestHistoryScreen:View {
  @EnvironmentObject private var api:Backend
  @State private var rows:[Item]=[]
