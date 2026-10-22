@@ -246,13 +246,44 @@ struct SquarePostCard:View{
  @State private var deleteConfirm=false
  var body:some View{VStack(alignment:.leading,spacing:12){HStack{NavigationLink{MemberScreen(member:post.text("author_id"))}label:{HStack{Avatar(path:post.text("avatar_path"),name:post.text("display_name"),size:38);Text(post.text("display_name")).font(.subheadline.bold())}};Spacer();if api.admin || post.text("author_id")==api.user.id{Button(role:.destructive){deleteConfirm=true}label:{Image(systemName:"trash")}.disabled(api.readOnly)}};Text(post.text("body")).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading);Text(post.text("created_at").replacingOccurrences(of:"T",with:" ").prefix(16)).font(.caption).foregroundStyle(.secondary);ScrollView(.horizontal){HStack{ForEach(["👍","❤️","😂","😮","😢","🙏"],id:\.self){emoji in TaskButton(title:emoji+" "+String(post.child("reactions").number(emoji)),symbol:post.text("my_reaction")==emoji ? "checkmark":""){_ = try await api.action("community_hub","react",["post":post.id,"emoji":post.text("my_reaction")==emoji ? "":emoji]);await reload()}.disabled(api.readOnly)}}};DisclosureGroup("التعليقات · \(post.number("comments"))",isExpanded:$showComments){if showComments{SquareComments(post:post.id)}}}.padding(16).background(Color(.secondarySystemBackground),in:RoundedRectangle(cornerRadius:18)).confirmationDialog("حذف المنشور وتعليقاته؟",isPresented:$deleteConfirm){Button("حذف",role:.destructive){Task{do{_ = try await api.action("community_hub","delete",["post":post.id]);await reload()}catch{}}}}}
 }
-struct SquareComments:View{
+struct SquareComments:View {
  @EnvironmentObject private var api:Backend
  let post:String
  @State private var rows:[Item]=[]
  @State private var text=""
  @State private var error=""
  @State private var more=false
- var body:some View{VStack(alignment:.leading,spacing:12){LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading){NavigationLink(r.text("display_name")){MemberScreen(member:r.text("author_id"))}.font(.caption.bold());Text(r.text("body")).textSelection(.enabled);if api.admin || r.text("author_id")==api.user.id{TaskButton(title:"حذف التعليق",symbol:"trash"){_ = try await api.action("community_hub","comment_delete",["post":post,"comment":r.id]);await load(reset:true)}.disabled(api.readOnly)}};if more{TaskButton(title:"تعليقات أخرى",symbol:"arrow.down"){await load(reset:false)}};TextField("اكتب تعليقك…",text:$text,axis:.vertical).lineLimit(2...5).textFieldStyle(.roundedBorder);TaskButton(title:"تعليق",symbol:"paperplane"){_ = try await api.action("community_hub","comment",["post":post,"body":text]);text="";await load(reset:true)}.disabled(api.readOnly || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.count>2000)}.task{await load(reset:true)}}
- func load(reset:Bool)async{do{let result=Item.items(try await api.action("community_hub","comments",["post":post,"after":reset ? "0":rows.last?.id ?? "0"]));if reset{rows=result}else{rows += result};more=result.count==100;error=""}catch{rows=[];self.error=api.errorText(error)}}
+ var body:some View {
+  VStack(alignment:.leading,spacing:12) {
+   LoadError(text:error)
+   ForEach(rows) { r in
+    VStack(alignment:.leading) {
+     NavigationLink(r.text("display_name")){MemberScreen(member:r.text("author_id"))}.font(.caption.bold())
+     Text(r.text("body")).textSelection(.enabled)
+     if api.admin || r.text("author_id")==api.user.id {
+      TaskButton(title:"حذف التعليق",symbol:"trash") {
+       _ = try await api.action("community_hub","comment_delete",["post":post,"comment":r.id])
+       await load(reset:true)
+      }.disabled(api.readOnly)
+     }
+    }
+   }
+   if more{TaskButton(title:"تعليقات أخرى",symbol:"arrow.down"){await load(reset:false)}}
+   TextField("اكتب تعليقك…",text:$text,axis:.vertical).lineLimit(2...5).textFieldStyle(.roundedBorder)
+   TaskButton(title:"تعليق",symbol:"paperplane") {
+    _ = try await api.action("community_hub","comment",["post":post,"body":text])
+    text=""
+    await load(reset:true)
+   }.disabled(api.readOnly || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.count>2000)
+  }.task{await load(reset:true)}
+ }
+ func load(reset:Bool)async {
+  do {
+   let after=reset ? "0":rows.last?.id ?? "0"
+   let result=Item.items(try await api.action("community_hub","comments",["post":post,"after":after]))
+   if reset{rows=result}else{rows += result}
+   more=result.count==100
+   error=""
+  } catch {rows=[];self.error=api.errorText(error)}
+ }
 }
