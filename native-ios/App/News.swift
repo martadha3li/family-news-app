@@ -43,7 +43,7 @@ struct NativePost:View {
     @State private var issue=""
     var editable:Bool{api.admin || (api.writer && post.text("author_id")==api.user.id)}
     var body:some View{VStack(alignment:.leading,spacing:0){HStack(spacing:10){NavigationLink{MemberScreen(member:post.text("author_id"))}label:{HStack(spacing:10){Avatar(path:post.child("profiles").text("avatar_path"),name:post.child("profiles").text("display_name"));VStack(alignment:.leading,spacing:3){Text(post.child("profiles").text("display_name")).font(.subheadline.weight(.semibold));Text(dateValue(post.text("created_at")),style:.date).font(.caption2).foregroundStyle(.secondary)}}.foregroundStyle(.primary)}.buttonStyle(.plain);Spacer();if editable{Menu{Button("تعديل الخبر",systemImage:"pencil"){edit()};Button(scope == .hidden ? "استعادة الخبر":"إخفاء الخبر",systemImage:scope == .hidden ? "arrow.uturn.backward":"eye.slash"){Task{do{_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["deleted_at":scope == .hidden ? NSNull():ISO8601DateFormatter().string(from:Date())]);await refresh()}catch{issue=api.errorText(error)}}};if api.admin{Button("حذف نهائي",systemImage:"trash",role:.destructive){confirmDelete=true}}}label:{Image(systemName:"ellipsis").frame(width:44,height:44)}}}.padding(.horizontal,14).padding(.vertical,10)
-        if !post.imagePaths.isEmpty{NewsAlbum(paths:post.imagePaths)}
+        if !post.imagePaths.isEmpty || !post.text("news_artwork").isEmpty{NewsAlbum(paths:post.imagePaths,post:post)}
         HStack(spacing:20){TaskButton(title:"",symbol:liked ? "heart.fill":"heart"){if liked{_ = try await api.table("likes",[q("post_id","eq."+post.id),q("user_id","eq."+api.user.id)],method:"DELETE")}else{_ = try await api.table("likes",method:"POST",body:["post_id":post.id,"user_id":api.user.id])};liked.toggle();count += liked ? 1 : -1}.disabled(api.readOnly).foregroundStyle(liked ? brandPink:Color.primary).accessibilityLabel(liked ? "إلغاء الإعجاب":"إعجاب");Button{withAnimation(.easeInOut(duration:0.2)){comments.toggle()}}label:{Image(systemName:"bubble.right")}.accessibilityLabel("تعليقات الخبر");if post.flag("published") && post.text("deleted_at").isEmpty{TaskButton(title:"",symbol:"paperplane"){let image=try await newsShareImage(post,api:api);sharedNews=SharedExport(items:[image])}.accessibilityLabel("مشاركة الخبر كصورة")};Spacer()}.font(.system(size:24)).buttonStyle(.plain).padding(.horizontal,12).padding(.vertical,6)
         Text("\(count) إعجاب").font(.subheadline.bold()).padding(.horizontal,14).padding(.bottom,4)
         VStack(alignment:.leading,spacing:6){Text(post.text("title")).font(.subheadline.bold());MentionBody(post:post);if scope == .mentioned{NavigationLink("فتح الخبر"){PostDestination(postID:post.id)}.font(.subheadline.bold())};if !post.flag("published"){Text(post.text("moderation_status")=="pending" ? "بانتظار موافقة المدير":"مسودة").font(.caption).foregroundStyle(brandPink)};if scope == .review && api.admin{HStack{TaskButton(title:"اعتماد ونشر",symbol:"checkmark"){_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["published":true,"moderation_status":"published"]);await refresh()};TaskButton(title:"رفض",symbol:"xmark"){_ = try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:["published":false,"moderation_status":"rejected"]);await refresh()}}.buttonStyle(.bordered)}}.padding(.horizontal,16).padding(.bottom,18)
@@ -97,19 +97,13 @@ struct AnnouncementTabs:View {
     }
 }
 struct NewsAlbum:View {
-    let paths:[String]
-    @State private var page=0
-    var body:some View {
-        VStack(spacing:8){
-            GeometryReader{geometry in
-                TabView(selection:$page){ForEach(Array(paths.enumerated()),id:\.offset){index,path in
-                    PrivateImage(path:path,bucket:"news-images",fill:false).frame(width:geometry.size.width,height:geometry.size.height).tag(index)
-                }}.tabViewStyle(.page(indexDisplayMode:.never))
-                .overlay(alignment:.topTrailing){if paths.count>1{Text("\(page+1) / \(paths.count)").font(.caption.monospacedDigit()).padding(.horizontal,10).padding(.vertical,5).foregroundStyle(.white).background(.black.opacity(0.55),in:Capsule()).padding(12)}}
-            }.aspectRatio(4.0/5.0,contentMode:.fit)
-            if paths.count>1{HStack(spacing:5){ForEach(paths.indices,id:\.self){index in Button{withAnimation{page=index}}label:{Circle().fill(index==page ? brandBlue:Color.secondary.opacity(0.25)).frame(width:6,height:6).padding(5)}.accessibilityLabel("الصورة \(index+1)")}}}
-        }.accessibilityElement(children:.contain).accessibilityLabel("صور الخبر").onChange(of:paths){_,_ in page=min(page,max(0,paths.count-1))}
-    }
+ @EnvironmentObject private var api:Backend
+ let paths:[String]
+ var post:Item?=nil
+ @State private var page=0
+ @State private var artwork:UIImage?
+ var total:Int{paths.count+(artwork==nil ? 0:1)}
+ var body:some View{VStack(spacing:8){GeometryReader{geometry in TabView(selection:$page){if let artwork{Image(uiImage:artwork).resizable().scaledToFit().frame(width:geometry.size.width,height:geometry.size.height).tag(0).accessibilityLabel("تصميم الخبر")};ForEach(Array(paths.enumerated()),id:\.offset){index,path in PrivateImage(path:path,bucket:"news-images",fill:false).frame(width:geometry.size.width,height:geometry.size.height).tag(index+(artwork==nil ? 0:1))}}.tabViewStyle(.page(indexDisplayMode:.never)).overlay(alignment:.topTrailing){if total>1{Text("\(page+1) / \(total)").font(.caption.monospacedDigit()).padding(.horizontal,10).padding(.vertical,5).foregroundStyle(.white).background(.black.opacity(0.55),in:Capsule()).padding(12)}}}.aspectRatio(4.0/5.0,contentMode:.fit);if total>1{HStack(spacing:5){ForEach(0..<total,id:\.self){index in Button{withAnimation{page=index}}label:{Circle().fill(index==page ? brandBlue:Color.secondary.opacity(0.25)).frame(width:6,height:6).padding(5)}.accessibilityLabel("الصورة \(index+1)")}}}}.accessibilityElement(children:.contain).accessibilityLabel("صور الخبر").task(id:(post?.text("news_artwork") ?? "")+(post?.text("body") ?? "")+paths.joined()+String(post?.flag("artwork_smart_crop") ?? true)){guard let post,!post.text("news_artwork").isEmpty else{artwork=nil;return};var photo:UIImage?;if let path=paths.first{if let bytes=try? await api.signedData(bucket:"news-images",path:path){photo=UIImage(data:bytes)}};if !Task.isCancelled{artwork=composeNewsArtwork(post,photo:photo)}}.onChange(of:paths){_,_ in page=0}}
 }
 struct EditorPhoto:Identifiable {let id=UUID();var path:String?;var data:Data?}
 struct PostEditor:View {
@@ -119,6 +113,7 @@ struct PostEditor:View {
     let saved:()async->Void
     @State private var title:String
     @State private var bodyText:String
+    @State private var smartArtwork=true
     @State private var publish:Bool
     @State private var photos:[PhotosPickerItem]=[]
     @State private var album:[EditorPhoto]
@@ -132,14 +127,14 @@ struct PostEditor:View {
     @State private var mentionError=""
     @State private var imageError=""
     var canChangePhotos:Bool{post == nil || post?.text("author_id")==api.user.id}
-    init(post:Item?,saved:@escaping ()async->Void){self.post=post;self.saved=saved;_title=State(initialValue:post?.text("title") ?? "");_bodyText=State(initialValue:post?.text("body") ?? "");_publish=State(initialValue:post?.flag("published") ?? true);_album=State(initialValue:(post?.imagePaths ?? []).map{EditorPhoto(path:$0)})}
+    init(post:Item?,saved:@escaping ()async->Void){self.post=post;self.saved=saved;_smartArtwork=State(initialValue:post?.raw["artwork_smart_crop"]as? Bool ?? true);_title=State(initialValue:post?.text("title") ?? "");_bodyText=State(initialValue:post?.text("body") ?? "");_publish=State(initialValue:post?.flag("published") ?? true);_album=State(initialValue:(post?.imagePaths ?? []).map{EditorPhoto(path:$0)})}
     var body:some View {
         Form {
             Section("الخبر"){TextField("عنوان الخبر",text:$title);VStack(alignment:.leading,spacing:10){
                     MentionEditor(text:$bodyText,selection:$caret).frame(height:180).accessibilityLabel("تفاصيل الخبر، اكتب @ للإشارة لعضو")
                     if mentionToken(bodyText,caret:caret.location) != nil{MentionSuggestions(people:inlineMembers,issue:mentionError){person in chooseMention(person)}}
                 }.task(id:bodyText+String(caret.location)){do{guard let token=mentionToken(bodyText,caret:caret.location) else{inlineMembers=[];mentionError="";return};try await Task.sleep(nanoseconds:180_000_000);try Task.checkCancellation();let result=Item.items(try await api.rpc("mention_search",["term":token.term]));try Task.checkCancellation();inlineMembers=result;mentionError=""}catch{if !Task.isCancelled{mentionError=api.errorText(error)}}};Toggle("نشر الخبر الآن",isOn:$publish)}
-            Section("صور الخبر · \(album.count) / ٥"){
+            Section("صور الخبر · \(album.count) / ٥"){Toggle("القص الذكي لصورة التصميم",isOn:$smartArtwork);
                 ForEach(Array(album.enumerated()),id:\.element.id){index,photo in
                     VStack{Group{if let data=photo.data,let image=UIImage(data:data){Image(uiImage:image).resizable().scaledToFit()}else if let path=photo.path{PrivateImage(path:path,bucket:"news-images",fill:false)}}.frame(height:160)
                         if canChangePhotos{HStack{Text("الصورة \(index+1)");Spacer();Button{album.swapAt(index,index-1)}label:{Image(systemName:"arrow.up")}.disabled(index==0).accessibilityLabel("تقديم الصورة");Button{album.swapAt(index,index+1)}label:{Image(systemName:"arrow.down")}.disabled(index==album.count-1).accessibilityLabel("تأخير الصورة");Button(role:.destructive){album.removeAll{$0.id==photo.id}}label:{Image(systemName:"trash")}.accessibilityLabel("إزالة الصورة")}.buttonStyle(.borderless)}
@@ -174,8 +169,8 @@ struct PostEditor:View {
         guard api.writer,title.trimmingCharacters(in:.whitespaces).count>=3,title.count<=250,!bodyText.trimmingCharacters(in:.whitespaces).isEmpty,bodyText.count<=20000,album.count<=5 else{throw FamilyError(text:"أدخل عنوانًا صالحًا وتفاصيل الخبر، وبحد أقصى ٥ صور.")}
         saving=true;defer{saving=false};var uploaded:[String]=[];var paths:[String]=[]
         do{
-            for photo in album{if let path=photo.path{paths.append(path)}else if let data=photo.data{let path=try await api.upload(data,bucket:"news-images");uploaded.append(path);paths.append(path)}}
-            var values:[String:Any]=["title":title,"body":bodyText,"published":publish,"mentioned_member_ids":selected.map(\.id),"image_paths":paths,"image_path":paths.first.map{$0 as Any} ?? NSNull()]
+            for photo in album{if let path=photo.path{paths.append(path)}else if let data=photo.data{let path=try await api.upload(data,bucket:"news-images",preserveAspect:true,smartCrop:false);uploaded.append(path);paths.append(path)}}
+            var values:[String:Any]=["artwork_smart_crop":smartArtwork,"title":title,"body":bodyText,"published":publish,"mentioned_member_ids":selected.map(\.id),"image_paths":paths,"image_path":paths.first.map{$0 as Any} ?? NSNull()]
             let rows:[Item];if let post=post{rows=try await api.table("posts",[q("id","eq."+post.id)],method:"PATCH",body:values)}else{values["author_id"]=api.user.id;rows=try await api.table("posts",method:"POST",body:values)}
             guard !rows.isEmpty else{throw FamilyError(text:"لم يتم حفظ الخبر. حدّث صلاحيات الحساب وأعد المحاولة.")}
         }catch{if !uploaded.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":uploaded])};throw error}
@@ -283,7 +278,7 @@ struct PopupAdvertisement:View {
 @MainActor func newsShareImage(_ post:Item,api:Backend)async throws->UIImage {
  guard post.flag("published"),post.text("deleted_at").isEmpty else{throw FamilyError(text:"المشاركة للأخبار المنشورة والمتاحة فقط")}
  var cover:UIImage?
- if let path=post.imagePaths.first{cover=UIImage(data:try await api.signedData(bucket:"news-images",path:path))}
+ if let path=post.imagePaths.first{cover=UIImage(data:try await api.signedData(bucket:"news-images",path:path))};if let artwork=composeNewsArtwork(post,photo:cover){cover=artwork}
  let paragraph=NSMutableParagraphStyle();paragraph.alignment = .right;paragraph.baseWritingDirection = .rightToLeft
  let titleAttributes:[NSAttributedString.Key:Any]=[.font:UIFont.boldSystemFont(ofSize:36),.paragraphStyle:paragraph,.foregroundColor:UIColor.black]
  let bodyAttributes:[NSAttributedString.Key:Any]=[.font:UIFont.systemFont(ofSize:28),.paragraphStyle:paragraph,.foregroundColor:UIColor.black]
@@ -305,4 +300,26 @@ struct PopupAdvertisement:View {
  let footer="خبر رقم "+post.id+" · "+dateValue(post.text("created_at")).formatted(date:.numeric,time:.omitted)
  (footer as NSString).draw(in:CGRect(x:60,y:height-55,width:960,height:40),withAttributes:[.font:UIFont.systemFont(ofSize:22),.foregroundColor:UIColor.darkGray,.paragraphStyle:paragraph])
  }
+}
+
+let newsArtworkNames:[(String,String)]=[("urgent","عاجل"),("promotion","ترقية"),("achievement","إنجاز عائلي"),("death","البقاء لله"),("graduation","تخرج"),("newborn","مولود جديد"),("quran","ختمة قرآن"),("quran-qr","ختمة قرآن · مع رموز التواصل"),("hospital","على السرير الأبيض"),("recovery","خروج من المشفى")]
+@MainActor func composeNewsArtwork(_ post:Item,photo:UIImage?)->UIImage?{
+ let key=post.text("news_artwork");guard newsArtworkNames.contains(where:{$0.0==key}),let background=UIImage(named:"NewsArtwork-"+key)else{return nil}
+ let format=UIGraphicsImageRendererFormat();format.scale=1;format.opaque=true
+ var portrait=photo
+ if let photo,post.raw["artwork_smart_crop"]as? Bool != false,let data=photo.jpegData(compressionQuality:0.95),let prepared=try? prepareSmartNewsPhoto(data,enabled:true){portrait=UIImage(data:prepared.data)}
+ let paragraph=NSMutableParagraphStyle();paragraph.alignment = .right;paragraph.baseWritingDirection = .rightToLeft;paragraph.lineSpacing=8
+ let rect=CGRect(x:portrait==nil ? 100:420,y:225,width:portrait==nil ? 880:590,height:365)
+ let label=newsArtworkNames.first{$0.0==key}?.1 ?? "";let title=post.text("title")==label ? "":post.text("title")
+ var text=(title.isEmpty ? "":title+"\n")+post.text("body"),font:CGFloat=42
+ func attributes(_ size:CGFloat)->[NSAttributedString.Key:Any]{[.font:UIFont.systemFont(ofSize:size),.paragraphStyle:paragraph,.foregroundColor:UIColor(red:0.145,green:0.231,blue:0.278,alpha:1)]}
+ while font>27 && (text as NSString).boundingRect(with:CGSize(width:rect.width,height:12000),options:[.usesLineFragmentOrigin,.usesFontLeading],attributes:attributes(font),context:nil).height>rect.height{font -= 1}
+ if (text as NSString).boundingRect(with:CGSize(width:rect.width,height:12000),options:[.usesLineFragmentOrigin,.usesFontLeading],attributes:attributes(font),context:nil).height>rect.height{let characters=Array(text);var low=0,high=characters.count;let suffix="\nالتفاصيل كاملة في نص الخبر…";while low<high{let mid=(low+high+1)/2;let candidate=String(characters.prefix(mid))+suffix;if(candidate as NSString).boundingRect(with:CGSize(width:rect.width,height:12000),options:[.usesLineFragmentOrigin,.usesFontLeading],attributes:attributes(font),context:nil).height<=rect.height{low=mid}else{high=mid-1}};text=String(characters.prefix(low))+suffix}
+ return UIGraphicsImageRenderer(size:CGSize(width:1080,height:1080),format:format).image{context in background.draw(in:CGRect(x:0,y:0,width:1080,height:1080));if let portrait{let box=CGRect(x:70,y:225,width:310,height:388);UIColor.white.setFill();context.fill(box.insetBy(dx:-6,dy:-6));let scale=min(box.width/portrait.size.width,box.height/portrait.size.height);portrait.draw(in:CGRect(x:box.midX-portrait.size.width*scale/2,y:box.midY-portrait.size.height*scale/2,width:portrait.size.width*scale,height:portrait.size.height*scale))};(text as NSString).draw(in:rect,withAttributes:attributes(font))}
+}
+struct NewsArtworkPreview:View{
+ let post:Item
+ let photo:UIImage?
+ @State private var image:UIImage?
+ var body:some View{Group{if let image{Image(uiImage:image).resizable().scaledToFit().accessibilityLabel("معاينة تصميم الخبر")}}.task(id:post.text("news_artwork")+post.text("body")+String(post.flag("artwork_smart_crop"))+String(photo?.hash ?? 0)){image=composeNewsArtwork(post,photo:photo)}}
 }

@@ -355,11 +355,11 @@ struct NewNewsRequestScreen:View {
      if processingPhotos{ProgressView("تجهيز الصور…")}
      ForEach(requestPhotos){p in VStack{if let image=UIImage(data:p.prepared){Image(uiImage:image).resizable().scaledToFit().frame(maxHeight:260)};Text(p.cropped ? "تم القص حول الوجه":"الصورة كاملة").font(.caption);Button("إزالة الصورة"){requestPhotos.removeAll{$0.id==p.id}}.disabled(processingPhotos)}}
     }
-    Section("معاينة الخبر"){RequestPreview(title:template.text("name"),text:renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]))}
+    Section("معاينة الخبر"){RequestPreview(title:template.text("name"),text:renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]));NewsArtworkPreview(post:Item(["news_artwork":template.text("artwork_key"),"title":template.text("name"),"body":renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]),"artwork_smart_crop":smartPhoto]),photo:requestPhotos.first.flatMap{UIImage(data:$0.original)})}
     TaskButton(title:"إرسال الطلب للصحفيين والمدير",symbol:"paperplane") {
      guard !processingPhotos else{throw FamilyError(text:"انتظر تجهيز الصور.")}
      var paths:[String]=[]
-     do{for photo in requestPhotos{paths.append(try await api.upload(photo.prepared,bucket:"news-images",smartCrop:false))};_ = try await api.action("news_request_action","submit",["request_id":requestID,"template":selected,"subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"image_paths":paths,"smart_crop_enabled":smartPhoto])}catch{if !paths.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":paths])};throw error}
+     do{for photo in requestPhotos{paths.append(try await api.upload(photo.original,bucket:"news-images",preserveAspect:true,smartCrop:false))};_ = try await api.action("news_request_action","submit",["request_id":requestID,"template":selected,"subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"image_paths":paths,"smart_crop_enabled":smartPhoto])}catch{if !paths.isEmpty{_ = try? await api.request("/storage/v1/object/news-images",method:"DELETE",body:["prefixes":paths])};throw error}
      requestPhotos=[]
 
      notice="وصل طلبك للصحفيين ومدير العائلة.";requestID=UUID().uuidString;subject="";newborn="";bride="";details=""
@@ -444,6 +444,7 @@ struct NewsTemplateEditor:View {
  let template:Item
  let saved:()async->Void
  @State private var name=""
+ @State private var artwork=""
  @State private var kind="general"
  @State private var pattern=""
  @State private var templateSelection=NSRange(location:0,length:0)
@@ -452,19 +453,19 @@ struct NewsTemplateEditor:View {
  var body:some View {
   Form {
    TextField("١. اسم نوع الخبر الظاهر بالقائمة",text:$name)
-   Picker("نوع الخبر",selection:$kind){Text("عام").tag("general");Text("مولود جديد").tag("newborn");Text("عقد قران").tag("marriage")}
+   if api.family.text("code")=="01"{Picker("خلفية الخبر",selection:$artwork){Text("بدون خلفية").tag("");ForEach(newsArtworkNames,id:\.0){key,label in Text(label).tag(key)}}};Picker("نوع الخبر",selection:$kind){Text("عام").tag("general");Text("مولود جديد").tag("newborn");Text("عقد قران").tag("marriage")}
    Text("٢. اكتب الصيغة واضغط موضع ظهور بيانات الطلب، ثم اختر الحقل أدناه لإدراجه في نفس المكان.").font(.subheadline)
    TemplatePatternEditor(text:$pattern,selection:$templateSelection).frame(minHeight:190).accessibilityLabel("صياغة الخبر وتحديد مواضع البيانات")
    Section("٣. إدراج بيانات الطلب عند المؤشر"){ForEach(fields,id:\.0){key,label in Button("＋ "+label){insertField(key)}}}
    Toggle("إتاحة النوع للأعضاء",isOn:$enabled)
    RequestPreview(title:name,text:renderRequestedNews(pattern,["subject":"أحمد علي","newborn":"علي","bride_father":"محمد حسن","details":"تفاصيل الخبر هنا","requester":"طالب الخبر"]))
    TaskButton(title:"حفظ وإضافة النوع لقائمة الأخبار",symbol:"checkmark") {
-    var payload:[String:Any]=["name":name,"kind":kind,"body":pattern,"enabled":enabled]
+    var payload:[String:Any]=["name":name,"kind":kind,"body":pattern,"enabled":enabled,"artwork_key":artwork.isEmpty ? NSNull():artwork as Any]
     if template.id != "new"{payload["id"]=template.id}
     _ = try await api.action("news_request_action","template_save",payload)
     await saved();dismiss()
    }.disabled(api.readOnly)
-  }.navigationTitle("نوع الخبر وصياغته").toolbar{Button("إغلاق"){dismiss()}}.onAppear{name=template.text("name");kind=template.text("kind").isEmpty ? "general":template.text("kind");pattern=template.text("body").isEmpty ? "تتقدم العائلة بالتهنئة إلى {subject}\n{details}":template.text("body");enabled=template.id=="new" || template.flag("enabled")}
+  }.navigationTitle("نوع الخبر وصياغته").toolbar{Button("إغلاق"){dismiss()}}.onAppear{artwork=template.text("artwork_key");name=template.text("name");kind=template.text("kind").isEmpty ? "general":template.text("kind");pattern=template.text("body").isEmpty ? "تتقدم العائلة بالتهنئة إلى {subject}\n{details}":template.text("body");enabled=template.id=="new" || template.flag("enabled")}
  }
  func insertField(_ key:String){let value=NSMutableString(string:pattern);let start=min(max(0,templateSelection.location),value.length);let length=min(max(0,templateSelection.length),value.length-start);let token="{"+key+"}";value.replaceCharacters(in:NSRange(location:start,length:length),with:token);pattern=value as String;templateSelection=NSRange(location:start+(token as NSString).length,length:0)}
 
