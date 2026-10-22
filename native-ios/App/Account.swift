@@ -233,9 +233,10 @@ struct FreeSquareScreen:View{
  @EnvironmentObject private var api:Backend
  @State private var rows:[Item]=[]
  @State private var bodyText=""
+ @State private var mentions:[Item]=[]
  @State private var error=""
  @State private var more=false
- var body:some View{ScrollView{LazyVStack(spacing:14){LoadError(text:error);VStack(alignment:.leading){Text("الساحة الحرة").font(.title2.bold());TextField("شارك فكرة أو افتح نقاشًا…",text:$bodyText,axis:.vertical).lineLimit(3...8).textFieldStyle(.roundedBorder);TaskButton(title:"نشر",symbol:"paperplane"){_ = try await api.action("community_hub","publish",["body":bodyText]);bodyText="";await load(reset:true)}.disabled(api.readOnly || bodyText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || bodyText.count>5000)}.padding();ForEach(rows){p in SquarePostCard(post:p){await load(reset:true)}};if more{TaskButton(title:"منشورات أقدم",symbol:"arrow.down"){await load(reset:false)}}}.frame(maxWidth:720).frame(maxWidth:.infinity).padding(.horizontal,10)}.navigationTitle("الساحة الحرة").task{await load(reset:true)}.refreshable{await load(reset:true)}}
+ var body:some View{ScrollView{LazyVStack(spacing:14){LoadError(text:error);VStack(alignment:.leading){Text("الساحة الحرة").font(.title2.bold());TextField("شارك فكرة أو افتح نقاشًا…",text:$bodyText,axis:.vertical).lineLimit(3...8).textFieldStyle(.roundedBorder);SquareMentionPicker(text:$bodyText,selected:$mentions);TaskButton(title:"نشر",symbol:"paperplane"){_ = try await api.action("community_hub","publish",["body":bodyText,"mentions":mentions.map(\.id)]);bodyText="";mentions=[];await load(reset:true)}.disabled(api.readOnly || bodyText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || bodyText.count>5000)}.padding();ForEach(rows){p in SquarePostCard(post:p){await load(reset:true)}};if more{TaskButton(title:"منشورات أقدم",symbol:"arrow.down"){await load(reset:false)}}}.frame(maxWidth:720).frame(maxWidth:.infinity).padding(.horizontal,10)}.navigationTitle("الساحة الحرة").task{await load(reset:true)}.refreshable{await load(reset:true)}}
  func load(reset:Bool)async{do{let payload:[String:Any]=reset ? [:]:["before":rows.last?.id ?? ""];let result=Item.items(try await api.action("community_hub","feed",payload));if reset{rows=result}else{rows += result};more=result.count==30;error=""}catch{rows=[];self.error=api.errorText(error)}}
 }
 struct SquarePostCard:View{
@@ -244,7 +245,7 @@ struct SquarePostCard:View{
  let reload:()async->Void
  @State private var showComments=false
  @State private var deleteConfirm=false
- var body:some View{VStack(alignment:.leading,spacing:12){HStack{NavigationLink{MemberScreen(member:post.text("author_id"))}label:{HStack{Avatar(path:post.text("avatar_path"),name:post.text("display_name"),size:38);Text(post.text("display_name")).font(.subheadline.bold())}};Spacer();if api.admin || post.text("author_id")==api.user.id{Button(role:.destructive){deleteConfirm=true}label:{Image(systemName:"trash")}.disabled(api.readOnly)}};Text(post.text("body")).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading);Text(post.text("created_at").replacingOccurrences(of:"T",with:" ").prefix(16)).font(.caption).foregroundStyle(.secondary);ScrollView(.horizontal){HStack{ForEach(["👍","❤️","😂","😮","😢","🙏"],id:\.self){emoji in TaskButton(title:emoji+" "+String(post.child("reactions").number(emoji)),symbol:post.text("my_reaction")==emoji ? "checkmark":""){_ = try await api.action("community_hub","react",["post":post.id,"emoji":post.text("my_reaction")==emoji ? "":emoji]);await reload()}.disabled(api.readOnly)}}};DisclosureGroup("التعليقات · \(post.number("comments"))",isExpanded:$showComments){if showComments{SquareComments(post:post.id)}}}.padding(16).background(Color(.secondarySystemBackground),in:RoundedRectangle(cornerRadius:18)).confirmationDialog("حذف المنشور وتعليقاته؟",isPresented:$deleteConfirm){Button("حذف",role:.destructive){Task{do{_ = try await api.action("community_hub","delete",["post":post.id]);await reload()}catch{}}}}}
+ var body:some View{VStack(alignment:.leading,spacing:12){HStack{NavigationLink{MemberScreen(member:post.text("author_id"))}label:{HStack{Avatar(path:post.text("avatar_path"),name:post.text("display_name"),size:38);Text(post.text("display_name")).font(.subheadline.bold())}};Spacer();if api.admin || post.text("author_id")==api.user.id{Button(role:.destructive){deleteConfirm=true}label:{Image(systemName:"trash")}.disabled(api.readOnly)}};Text(post.text("body")).font(.system(size:17)).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading);ForEach(post.rows("mentions")){m in NavigationLink("@"+m.text("display_name")){MemberScreen(member:m.id)}.font(.subheadline)};Text(post.text("created_at").replacingOccurrences(of:"T",with:" ").prefix(16)).font(.caption).foregroundStyle(.secondary);ScrollView(.horizontal){HStack{ForEach(["👍","❤️","😂","😮","😢","🙏"],id:\.self){emoji in TaskButton(title:emoji+" "+String(post.child("reactions").number(emoji)),symbol:post.text("my_reaction")==emoji ? "checkmark":""){_ = try await api.action("community_hub","react",["post":post.id,"emoji":post.text("my_reaction")==emoji ? "":emoji]);await reload()}.disabled(api.readOnly)}}};DisclosureGroup("التعليقات · \(post.number("comments"))",isExpanded:$showComments){if showComments{SquareComments(post:post.id)}}}.padding(16).background(Color(.systemBackground),in:RoundedRectangle(cornerRadius:10)).overlay(RoundedRectangle(cornerRadius:10).stroke(Color(.separator).opacity(0.3))).confirmationDialog("حذف المنشور وتعليقاته؟",isPresented:$deleteConfirm){Button("حذف",role:.destructive){Task{do{_ = try await api.action("community_hub","delete",["post":post.id]);await reload()}catch{}}}}}
 }
 struct SquareComments:View {
  @EnvironmentObject private var api:Backend
@@ -493,4 +494,45 @@ struct NewsRequestHistoryScreen:View {
  let names=["submitted":"إرسال الطلب","claimed":"حجز المراجعة","manager_takeover":"تولي المراجعة بواسطة المدير","draft_saved":"حفظ مسودة","released":"ترك المراجعة","approved":"اعتماد الخبر","published":"نشر الخبر","published_legacy":"نشر سابق","sent_for_approval":"إرسال لموافقة المدير","rejected":"رفض الطلب","cancelled":"إلغاء الطلب"]
  var body:some View{List{LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:8){Text(r.text("title")).font(.headline);Text((names[r.text("event")] ?? r.text("event"))+" · "+r.text("actor_name"));Text(dateValue(r.text("created_at")),format:.dateTime.year().month().day().hour().minute()).font(.caption);if !r.text("post_id").isEmpty{NavigationLink("فتح الخبر"){PostDestination(postID:r.text("post_id"))}}}};if more{TaskButton(title:"سجل أقدم",symbol:"arrow.down"){await load(reset:false)}}}.navigationTitle("سجل مراجعة واعتماد الأخبار").task{await load(reset:true)}.refreshable{await load(reset:true)}}
  func load(reset:Bool)async{do{let result=Item.items(try await api.action("news_request_action","history",["offset":reset ? 0:rows.count]));if reset{rows=result}else{rows += result};more=result.count==50;error=""}catch{self.error=api.errorText(error)}}
+}
+
+struct SquareMentionPicker:View{
+ @EnvironmentObject private var api:Backend
+ @Binding var text:String
+ @Binding var selected:[Item]
+ @State private var term=""
+ @State private var rows:[Item]=[]
+ var body:some View{VStack(alignment:.leading){TextField("@ ابحث عن عضو للمنشن",text:$term);ForEach(selected){m in Button("@"+m.text("display_name")+" ×"){selected.removeAll{$0.id==m.id}}.font(.caption)};ForEach(rows.prefix(10)){m in Button(m.text("display_name")){guard selected.count<30 else{return};selected.append(m);text += " @"+m.text("display_name");term="";rows=[]}}}.task(id:term){do{try await Task.sleep(nanoseconds:220_000_000);guard !term.isEmpty else{rows=[];return};let result=Item.items(try await api.action("community_hub","search",["term":term]));try Task.checkCancellation();rows=result.filter{m in !selected.contains{$0.id==m.id}}}catch{}}}
+}
+struct FamilyPauseControl:View{
+ @EnvironmentObject private var api:Backend
+ @State private var confirm=false
+ var body:some View{Form{Text("يوقف دخول جميع أعضاء العائلة مؤقتًا. يمكنك إعادة التشغيل من شاشة الإيقاف.");Button("إيقاف الكيان بالكامل",role:.destructive){confirm=true}}.navigationTitle("إيقاف الكيان").confirmationDialog("إيقاف دخول جميع الأعضاء؟",isPresented:$confirm){Button("إيقاف الكيان",role:.destructive){Task{do{_ = try await api.rpc("family_pause",["paused":true]);try await api.loadAccount()}catch{api.warning=api.errorText(error)}}}}}
+}
+struct FamilyPausedScreen:View{
+ @EnvironmentObject private var api:Backend
+ var body:some View{NavigationStack{VStack(spacing:24){Brand();Image(systemName:"pause.circle").font(.system(size:48));Text("تم ايقاف الكيان بالكامل مؤقتاً").font(.title3).multilineTextAlignment(.center);if api.family.flag("can_resume"){TaskButton(title:"إعادة تشغيل الكيان",symbol:"play.circle"){_ = try await api.rpc("family_pause",["paused":false]);try await api.loadAccount()};NavigationLink("الدعم الفني"){SupportScreen()}};TaskButton(title:"تحديث الحالة",symbol:"arrow.clockwise"){try await api.loadAccount()};TaskButton(title:"تسجيل الخروج",symbol:"rectangle.portrait.and.arrow.right"){await api.logout()}}.padding()}}
+}
+struct SupportScreen:View{
+ @EnvironmentObject private var api:Backend
+ var platform=false
+ @State private var rows:[Item]=[]
+ @State private var subject=""
+ @State private var detail=""
+ @State private var error=""
+ func call(_ action:String,_ payload:[String:Any]=[:])async throws->Any{var p=payload;p["platform"]=platform;return try await api.action("support_action",action,p)}
+ func load()async{do{rows=Item.items(try await call("list"));error=""}catch{self.error=api.errorText(error)}}
+ var body:some View{List{LoadError(text:error);if !platform{Section("طلب دعم جديد"){TextField("عنوان الطلب",text:$subject);TextField("اشرح المشكلة…",text:$detail,axis:.vertical).lineLimit(3...8);TaskButton(title:"إرسال طلب الدعم",symbol:"paperplane"){_ = try await call("create",["subject":subject,"body":detail]);subject="";detail="";await load()}.disabled(subject.count<3 || subject.count>200 || detail.isEmpty || detail.count>5000)}};ForEach(rows){t in NavigationLink{SupportThreadScreen(ticket:t,platform:platform)}label:{VStack(alignment:.leading,spacing:6){Text(t.text("subject")).font(.headline);if platform{Text(t.text("family_name")+" · "+t.text("family_code"))};Text(t.text("status")=="closed" ? "مغلق":"مفتوح").font(.caption);Text(t.flag("last_from_platform") ? "آخر رد من إدارة المنصة":"آخر رسالة من مدير العائلة").font(.caption).foregroundStyle(.secondary)}}}}.navigationTitle("الدعم الفني").task{await load()}.refreshable{await load()}.onReceive(Timer.publish(every:15,on:.main,in:.common).autoconnect()){_ in Task{await load()}}}
+}
+struct SupportThreadScreen:View{
+ @EnvironmentObject private var api:Backend
+ let ticket:Item
+ var platform=false
+ @State private var rows:[Item]=[]
+ @State private var text=""
+ @State private var error=""
+ @State private var more=false
+ func call(_ action:String,_ payload:[String:Any]=[:])async throws->Any{var p=payload;p["ticket"]=ticket.id;p["platform"]=platform;return try await api.action("support_action",action,p)}
+ func load(reset:Bool)async{do{let result=Item.items(try await call("messages",["after":reset ? "0":rows.last?.id ?? "0"]));if reset{rows=result}else{rows += result};more=result.count==100;error=""}catch{self.error=api.errorText(error)}}
+ var body:some View{ScrollView{LazyVStack(alignment:.leading,spacing:12){LoadError(text:error);ForEach(rows){m in VStack(alignment:.leading,spacing:8){Text(m.flag("from_platform") ? "إدارة المنصة":"مدير العائلة").font(.caption.bold());Text(m.text("body")).textSelection(.enabled);Text(m.text("created_at").replacingOccurrences(of:"T",with:" ").prefix(16)).font(.caption2).foregroundStyle(.secondary)}.padding().frame(maxWidth:.infinity,alignment:.leading).background(m.flag("from_platform") ? brandBlue.opacity(0.12):Color(.secondarySystemBackground),in:RoundedRectangle(cornerRadius:14))};if more{TaskButton(title:"رسائل أخرى",symbol:"arrow.down"){await load(reset:false)}};TextField("اكتب ردك…",text:$text,axis:.vertical).lineLimit(2...8).textFieldStyle(.roundedBorder);TaskButton(title:"إرسال الرد",symbol:"paperplane"){_ = try await call("reply",["body":text]);text="";await load(reset:true)}.disabled(text.isEmpty || text.count>5000);TaskButton(title:"إغلاق الطلب",symbol:"checkmark"){_ = try await call("close")}}.padding()}.navigationTitle(ticket.text("subject")).task{await load(reset:true)}.refreshable{await load(reset:true)}.onReceive(Timer.publish(every:10,on:.main,in:.common).autoconnect()){_ in if !more{Task{await load(reset:false)}}}}
 }

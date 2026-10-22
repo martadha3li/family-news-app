@@ -36,6 +36,7 @@ enum CredentialStore {
     @Published var platformAdmin=false
     @Published var profile=Item()
     @Published var user=Item()
+    @Published var familyPaused=false
     @Published var signedIn=false
     @Published var restoring=true
     @Published var startupProgress=0.0
@@ -45,7 +46,7 @@ enum CredentialStore {
     private var sessionGeneration=0
     private var refreshTask:Task<Void,Error>?
     private let network:URLSession = { let c=URLSessionConfiguration.ephemeral; c.urlCache=nil; c.requestCachePolicy = .reloadIgnoringLocalCacheData; c.timeoutIntervalForRequest=30; return URLSession(configuration:c) }()
-    var active:Bool { signedIn && profile.text("status")=="active" }
+    var active:Bool { signedIn && !familyPaused && profile.text("status")=="active" }
     var admin:Bool { active && profile.text("role")=="admin" }
     var readOnly:Bool { family.flag("read_only") || (!family.text("subscription_ends_at").isEmpty && dateValue(family.text("subscription_ends_at"))<=Date()) }
     var writer:Bool { active && !readOnly && ["admin","journalist"].contains(profile.text("role")) }
@@ -92,16 +93,16 @@ enum CredentialStore {
         startupProgress=1;try? await Task.sleep(nanoseconds:180_000_000)
     }
     func login(email:String,password:String) async throws {guard let s=try await request("/auth/v1/token?grant_type=password",method:"POST",body:["email":email.trimmingCharacters(in:.whitespacesAndNewlines).lowercased()=="admin" ? "martadha3li@gmail.com":email.trimmingCharacters(in:.whitespacesAndNewlines),"password":password],auth:false) as? [String:Any] else{throw FamilyError(text:"تعذّر تسجيل الدخول.")};try keep(s);try await loadAccount()}
-    func loadAccount(startup:Bool=false) async throws {let u=Item(try await request("/auth/v1/user") as? [String:Any] ?? [:]);if startup{startupProgress=0.6};let tenant=Item(try await rpc("tenant_current") as? [String:Any] ?? [:]);guard tenant.text("status")=="active",family.id.isEmpty || family.id==tenant.id else{clearSession();throw FamilyError(text:"الكيان موقوف أو الحساب تابع لعائلة أخرى. غيّر الكيان ثم سجّل الدخول.")};selectFamily(tenant);platformAdmin=(try? await rpc("platform_action",["action":"check"])) as? Bool ?? false;let p=Item(try await rpc("profile_get") as? [String:Any] ?? [:]);guard !u.id.isEmpty,!p.text("status").isEmpty else{throw FamilyError(text:"لم يكتمل ملف الحساب.")};if startup{startupProgress=0.9};user=u;profile=p;signedIn=true;warning=""}
+    func loadAccount(startup:Bool=false) async throws {let u=Item(try await request("/auth/v1/user") as? [String:Any] ?? [:]);if startup{startupProgress=0.6};let tenant=Item(try await rpc("tenant_current") as? [String:Any] ?? [:]);if tenant.text("status")=="family_paused",family.id.isEmpty || family.id==tenant.id{selectFamily(tenant);familyPaused=true;user=u;profile=Item();signedIn=true;return};familyPaused=false;guard tenant.text("status")=="active",family.id.isEmpty || family.id==tenant.id else{clearSession();throw FamilyError(text:"الكيان موقوف أو الحساب تابع لعائلة أخرى. غيّر الكيان ثم سجّل الدخول.")};selectFamily(tenant);platformAdmin=(try? await rpc("platform_action",["action":"check"])) as? Bool ?? false;let p=Item(try await rpc("profile_get") as? [String:Any] ?? [:]);guard !u.id.isEmpty,!p.text("status").isEmpty else{throw FamilyError(text:"لم يكتمل ملف الحساب.")};if startup{startupProgress=0.9};user=u;profile=p;signedIn=true;warning=""}
     func logout() async {do {_ = try await request("/auth/v1/logout",method:"POST")}catch{};clearSession()}
-    func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];if !isolatedSession{CredentialStore.clear()};signedIn=false;platformAdmin=false;user=Item();profile=Item()}
+    func clearSession(){sessionGeneration += 1;refreshTask?.cancel();refreshTask=nil;session=[:];if !isolatedSession{CredentialStore.clear()};signedIn=false;familyPaused=false;platformAdmin=false;user=Item();profile=Item()}
     func signup(email:String,password:String,details:[String:Any]) async throws {guard password.count>=10 else{throw FamilyError(text:"كلمة المرور 10 أحرف على الأقل.")};_ = try await request("/auth/v1/signup?redirect_to="+website.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed)!,method:"POST",body:["email":email,"password":password,"data":details.merging(["family_code":family.text("code")]){_,new in new}],auth:false)}
     func selectFamily(_ item:Item){family=item;UserDefaults.standard.set(item.raw.filter{!($0.value is NSNull)},forKey:"family-selection");FamilyTheme.update(family);syncFamilyIcon()}
     func exitFamily()async{await logout();family=Item();UserDefaults.standard.removeObject(forKey:"family-selection");FamilyTheme.update(family);syncFamilyIcon()}
     func checkFamilyAccess()async {
         let epoch=sessionGeneration
         guard signedIn else{return}
-        do{let current=Item(try await rpc("tenant_current")as? [String:Any] ?? [:]);guard epoch==sessionGeneration else{return};if current.text("status") != "active"{clearSession();warning="دخول الكيان معلّق أو موقوف"}else if current.id==family.id{family=current}}catch{}
+        do{let current=Item(try await rpc("tenant_current")as? [String:Any] ?? [:]);guard epoch==sessionGeneration else{return};if current.text("status")=="family_paused",current.id==family.id{family=current;profile=Item();familyPaused=true}else if current.text("status") != "active"{clearSession();warning="دخول الكيان معلّق أو موقوف"}else if current.id==family.id{family=current}}catch{}
     }
     func syncFamilyIcon(){TenantAppIcon.request(family){[weak self] message in self?.warning=message}}
     func platformLogin(username:String,password:String)async throws{

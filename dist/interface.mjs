@@ -35,7 +35,7 @@ export function initInterface({$,state,showSection}){
  const newGroup=[...document.querySelectorAll('.chat-layout aside button')].find(b=>b.textContent.includes('＋ مجموعة'));presentButton(newGroup,'plus','مجموعة جديدة');
  const drawer=$('nav-drawer');const drawerBrand=document.createElement('div');drawerBrand.className='drawer-brand';const brand=document.createElement('img');brand.src='/family-logo.png';brand.alt='أخبار العائلة';drawerBrand.append(brand);drawer.querySelector('.feed-heading').after(drawerBrand);
  const nav=document.createElement('nav');nav.id='mobile-navigation';nav.className='mobile-navigation';nav.setAttribute('aria-label','التنقل الرئيسي');nav.hidden=true;const shortcuts=[];
- for(const [id,name,label,action]of [['news','home','الأخبار',()=>$('news-tab').click()],['chat','chat','الدردشات',()=>$('chat-tab').click()],['create','plus','طلب خبر',()=>$('request-news-plus').click()],['profile','user','حسابي',()=>$('profile-open').click()],['menu','menu','المزيد',()=>$('menu-open').click()]]){const b=document.createElement('button');b.type='button';b.dataset.destination=id;presentButton(b,name,label);b.onclick=action;nav.append(b);shortcuts.push(b);}
+ for(const [id,name,label,action]of [['news','home','الأخبار',()=>$('news-tab').click()],['chat','chat','الدردشات',()=>$('chat-tab').click()],['square','people','الساحة',()=>document.getElementById('free-square-open')?.click()],['create','plus','طلب خبر',()=>$('request-news-plus').click()],['profile','user','حسابي',()=>$('profile-open').click()],['menu','menu','المزيد',()=>$('menu-open').click()]]){const b=document.createElement('button');b.type='button';b.dataset.destination=id;presentButton(b,name,label);b.onclick=action;nav.append(b);shortcuts.push(b);}
  document.body.append(nav);
  // Touch focus stays native: no global touch handlers or keyboard overrides.
  for(const input of document.querySelectorAll('input[type="search"],#chat-search'))input.setAttribute('enterkeyhint','search');
@@ -45,7 +45,7 @@ export function initInterface({$,state,showSection}){
  function sync(section=state.uiSection||'news'){
   state.uiSection=section;const signed=!!state.user,active=signed&&state.profile?.status==='active';nav.hidden=!active;
   document.body.classList.toggle('signed-in',signed);document.body.classList.toggle('member-active',active);
-  for(const b of shortcuts){const target=b.dataset.destination;b.hidden=false;b.classList.toggle('active',target===section);if(target===section)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');}
+  for(const b of shortcuts){const target=b.dataset.destination;b.hidden=target==='square'&&state.freeSquareEnabled===false;b.classList.toggle('active',target===section);if(target===section)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');}
  }
- sync();return {sync};
+ document.addEventListener('family:square-status',()=>sync());sync();return {sync};
 }

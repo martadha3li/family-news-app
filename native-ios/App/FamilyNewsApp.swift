@@ -43,6 +43,7 @@ struct RootScreen:View {
             else if (gate.hasSession || api.signedIn) && !gate.unlocked{BiometricLockScreen(gate:gate,api:api)}
             else if api.restoring{LaunchScreen(progress:api.startupProgress)}
             else if !api.signedIn{LoginScreen()}
+            else if api.familyPaused{FamilyPausedScreen()}
             else{HomeScreen()}
         }.task(id:api.family.id){api.syncFamilyIcon();if api.family.id.isEmpty{api.restoring=false}else{await gate.start(api)}}
         .task(id:String(api.active)+String(gate.unlocked)+String(describing:phase)){
@@ -86,15 +87,17 @@ struct HomeScreen:View {
     @EnvironmentObject private var api:Backend
     @State private var selection=0
     @State private var campaign:PopupCampaign?
+    @State private var squareEnabled=false
     @State private var checkedCampaign=false
     @State private var chats=false
     @State private var notifications=false
     var body:some View{TabView(selection:$selection){NavigationStack{if api.active{NewsScreen().safeAreaInset(edge:.bottom){FamilyInstallInvitation()}}else{VStack(spacing:20){Image(systemName:"person.badge.clock").font(.largeTitle);Text(api.profile.text("status")=="suspended" ? "الحساب موقوف مؤقتًا":"حسابك بانتظار الاعتماد").font(.title3);TaskButton(title:"تحديث حالة الحساب",symbol:"arrow.clockwise"){try await api.loadAccount()};NavigationLink("إكمال ملفي"){ProfileScreen()}}.padding()}}.tabItem{Label("الأخبار",systemImage:"house")}.tag(0)
+        if api.active && squareEnabled{NavigationStack{FreeSquareScreen()}.tabItem{Label("الساحة",systemImage:"person.3")}.tag(4)}
         if api.active{Color.clear.tabItem{Label("الدردشات",systemImage:"bubble.left.and.bubble.right")}.tag(1)}
         NavigationStack{ProfileScreen()}.tabItem{Label("حسابي",systemImage:"person.crop.circle")}.tag(2)
         NavigationStack{MoreScreen()}.tabItem{Label("المزيد",systemImage:"line.3.horizontal")}.tag(3)
     }.safeAreaInset(edge:.top){if api.readOnly || api.family.flag("trial"){Text(lifecycleDescription(api.family)).font(.footnote).padding(8).frame(maxWidth:.infinity).background(Color.orange.opacity(0.15))}}.task(id:api.active){
-        guard api.active,!api.readOnly,!checkedCampaign else{return};checkedCampaign=true
+        if api.active{let hub=Item((try? await api.action("community_hub","self"))as? [String:Any] ?? [:]);squareEnabled=hub.flag("enabled")};guard api.active,!api.readOnly,!checkedCampaign else{return};checkedCampaign=true
         let owner=api.user.id
         do{
             let ads=Item.items(try await api.rpc("promo_due"))
@@ -201,10 +204,10 @@ struct TenantSelectionScreen:View {
     @State private var showFamilies=true
     @State private var loadingDirectory=true
     var body:some View{NavigationStack{List{
-        Section{Brand().frame(maxWidth:.infinity).padding(.vertical,12);Text("اختر عائلتك مرة واحدة. يُحفظ الاختيار على هذا الجهاز، ويمكن تغييره لاحقًا.").font(.subheadline);TextField("كود العائلة أو اسمها",text:$term).textInputAutocapitalization(.never);LoadError(text:error)}
-        Section{DisclosureGroup("العوائل المتاحة",isExpanded:$showFamilies){ForEach(families){family in Button{selected=family}label:{HStack(spacing:12){Group{if let image=tenantLogo(family){Image(uiImage:image).resizable().scaledToFit()}else{Image(family.text("code")=="01" ? "Family01Preview":"PlatformLogo").resizable().scaledToFit()}}.frame(width:48,height:48);VStack(alignment:.leading){Text(family.text("name")).font(.headline);Text("الكود "+family.text("code")).font(.caption)}}}}}}
+        Section{Brand().frame(maxWidth:.infinity).padding(.vertical,12);Text("أدخل كود عائلتك كاملًا. لا تُعرض قائمة العوائل حفاظًا على الخصوصية.").font(.subheadline);TextField("كود العائلة الخاص",text:$term).textInputAutocapitalization(.never);LoadError(text:error)}
+        Section{DisclosureGroup("نتيجة البحث بالكود",isExpanded:$showFamilies){ForEach(families){family in Button{selected=family}label:{HStack(spacing:12){Group{if let image=tenantLogo(family){Image(uiImage:image).resizable().scaledToFit()}else{Image(family.text("code")=="01" ? "Family01Preview":"PlatformLogo").resizable().scaledToFit()}}.frame(width:48,height:48);VStack(alignment:.leading){Text(family.text("name")).font(.headline);Text("الكود "+family.text("code")).font(.caption)}}}}}}
         Section{Button("تسجيل عائلة جديدة"){request=true};Button("دخول إدارة المنصة"){platform=true}}
-    }.navigationTitle("أهلًا بك").overlay{if loadingDirectory{LaunchScreen(progress:0.35)}}.task(id:term){defer{if !Task.isCancelled{loadingDirectory=false}};do{try await Task.sleep(nanoseconds:220_000_000);let rows=Item.items(try await api.request("/rest/v1/rpc/tenant_directory",method:"POST",body:["term":term],auth:false));try Task.checkCancellation();families=rows;error=""}catch{if !Task.isCancelled{self.error=api.errorText(error)}}}
+    }.navigationTitle("أهلًا بك").overlay{if loadingDirectory{LaunchScreen(progress:0.35)}}.task(id:term){defer{if !Task.isCancelled{loadingDirectory=false}};do{try await Task.sleep(nanoseconds:220_000_000);guard !term.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else{families=[];return};families=[];let rows=Item.items(try await api.request("/rest/v1/rpc/tenant_directory",method:"POST",body:["term":term],auth:false));try Task.checkCancellation();families=rows;error=""}catch{if !Task.isCancelled{self.error=api.errorText(error)}}}
     .confirmationDialog(selected?.text("name") ?? "",isPresented:Binding(get:{selected != nil},set:{if !$0{selected=nil}}),titleVisibility:.visible){Button("تأكيد الدخول وحفظ الكيان"){if let family=selected{Task{if api.signedIn{await api.logout()};api.selectFamily(family);selected=nil}}}}message:{Text("ستفتح واجهة هذه العائلة باسمها وشعارها مباشرة في المرات القادمة. "+(selected?.text("code")=="01" ? "ستتغير أيقونة التطبيق إلى شعار العائلة على الشاشة الرئيسية. يبقى اسم التطبيق العوائل وفق قيود الآيفون.":"يمكنك إضافة تطبيق العائلة باسمها وشعارها إلى الشاشة الرئيسية عبر Safari."))}
     .sheet(isPresented:$request){NavigationStack{TenantRequestScreen()}}
     .sheet(isPresented:$platform){TenantPlatformLogin()}
@@ -471,7 +474,7 @@ func invoiceShareURL(_ i:Item,whatsapp:Bool)->URL? {
     return URL(string:"mailto:"+safe+"?subject="+("مطالبة اشتراك "+i.text("number")).addingPercentEncoding(withAllowedCharacters:.alphanumerics)!+"&body="+text)
 }
 struct PlatformDashboard:View {
-    var body:some View{List{Section("إدارة المنصة المستقلة"){NavigationLink("الكيانات العائلية"){TenantPlatformList()};NavigationLink("الباقات والاشتراكات"){BillingPlansScreen()};NavigationLink("الفواتير ومطالبات السداد"){BillingInvoicesScreen(tenant:nil)};NavigationLink("المهل والبريد والحذف التلقائي"){PlatformLifecycleScreen()}}}.navigationTitle("إدارة المنصة")}
+    var body:some View{List{Section("إدارة المنصة المستقلة"){NavigationLink("طلبات الدعم الفني"){SupportScreen(platform:true)};NavigationLink("الكيانات العائلية"){TenantPlatformList()};NavigationLink("الباقات والاشتراكات"){BillingPlansScreen()};NavigationLink("الفواتير ومطالبات السداد"){BillingInvoicesScreen(tenant:nil)};NavigationLink("المهل والبريد والحذف التلقائي"){PlatformLifecycleScreen()}}}.navigationTitle("إدارة المنصة")}
 }
 struct BillingPlansScreen:View {
     @EnvironmentObject private var api:Backend
