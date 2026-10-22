@@ -1,0 +1,22 @@
+const PUBLIC_API='https://dlkykiducjimwehfhxfq.supabase.co/rest/v1/rpc/tenant_directory';
+const PUBLIC_KEY='sb_publishable_em1zUQS1tUhfk_8Ji17n8g_H8CPQynt';
+const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const validCode=code=>/^[A-Za-z0-9-]{1,40}$/.test(code);
+export function makeWorker(assets){
+ const text=(path)=>new TextDecoder().decode(bytes(assets[path][1]));
+ function bytes(base64){return Uint8Array.from(atob(base64),c=>c.charCodeAt(0))}
+ function asset(path,method){const a=assets[path];if(!a)return new Response('Not found',{status:404});return new Response(method==='HEAD'?null:bytes(a[1]),{headers:{'Content-Type':a[0],'X-Content-Type-Options':'nosniff','Cache-Control':path.endsWith('.html')||path==='/sw.js'?'no-cache':'public,max-age=300'}})}
+ async function family(code){const response=await fetch(PUBLIC_API,{method:'POST',headers:{'Content-Type':'application/json',apikey:PUBLIC_KEY},body:JSON.stringify({term:code}),signal:AbortSignal.timeout(8000)});if(!response.ok)throw Error('Directory unavailable');const rows=await response.json();return Array.isArray(rows)?rows.find(t=>String(t.code).toUpperCase()===code.toUpperCase()):null}
+ return{async fetch(request){const url=new URL(request.url),method=request.method;if(!['GET','HEAD'].includes(method))return new Response('Method not allowed',{status:405,headers:{Allow:'GET, HEAD'}});let path;try{path=decodeURIComponent(url.pathname)}catch{return new Response('Bad request',{status:400})}
+ const match=path.match(/^\/family\/([A-Za-z0-9-]{1,40})(?:\/(manifest\.webmanifest|icon|icon\.svg))?\/?$/);
+ if(match){const code=match[1];if(!validCode(code))return new Response('Not found',{status:404});let t;try{t=await family(code)}catch{return new Response('تعذر تحميل بيانات العائلة. أعد المحاولة.',{status:503,headers:{'Content-Type':'text/plain;charset=utf-8','Cache-Control':'no-store'}})}if(!t)return new Response('الكيان غير متاح أو موقوف.',{status:404,headers:{'Content-Type':'text/plain;charset=utf-8','Cache-Control':'no-store'}});
+ const root='/family/'+encodeURIComponent(t.code)+'/',name=String(t.name).slice(0,100),logo=typeof t.logo==='string'&&/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(t.logo)&&t.logo.length<=300000?t.logo:null;
+ const headers={'Cache-Control':'public,max-age=60','X-Content-Type-Options':'nosniff'};
+ if(match[2]==='manifest.webmanifest'){const manifest={id:root,name,short_name:name,lang:'ar',dir:'rtl',start_url:root,scope:'/',display:'standalone',background_color:'#f6f9fc',theme_color:'#397b9c',icons:[{src:root+'icon.svg',sizes:'any',type:'image/svg+xml',purpose:'any'}]};return new Response(method==='HEAD'?null:JSON.stringify(manifest),{headers:{...headers,'Content-Type':'application/manifest+json;charset=utf-8'}})}
+ if(match[2]==='icon'){if(logo){const comma=logo.indexOf(',');return new Response(method==='HEAD'?null:bytes(logo.slice(comma+1)),{headers:{...headers,'Content-Type':logo.slice(5,logo.indexOf(';'))}})}return asset(t.code==='01'?'/family-01-touch-icon.png':'/apple-touch-icon.png',method)}
+ if(match[2]==='icon.svg'){const fallback=assets[t.code==='01'?'/family-01-icon-512.png':'/icon-512.png'];const source=logo||'data:'+fallback[0]+';base64,'+fallback[1];const svg='<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" fill="white"/><image x="24" y="24" width="464" height="464" preserveAspectRatio="xMidYMid meet" xlink:href="'+escapeHTML(source)+'"/></svg>';return new Response(method==='HEAD'?null:svg,{headers:{...headers,'Content-Type':'image/svg+xml'}})}
+ let html=text('/index.html').replace(/<title>[^<]*<\/title>/,'<title>'+escapeHTML(name)+'</title>').replace(/<link rel="manifest"[^>]*>/,'<link rel="manifest" href="'+root+'manifest.webmanifest">').replace(/<link rel="apple-touch-icon"[^>]*>/,'<link rel="apple-touch-icon" href="'+root+'icon">').replace(/<link rel="icon"[^>]*>/,'<link rel="icon" href="'+root+'icon">').replace('</head>','<meta name="apple-mobile-web-app-title" content="'+escapeHTML(name)+'"><meta name="apple-mobile-web-app-capable" content="yes"></head>');return new Response(method==='HEAD'?null:html,{headers:{...headers,'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-cache'}})
+ }
+ if(path.startsWith('/family/'))return new Response('Not found',{status:404});if(path==='/')path='/index.html';return asset(path,method)
+ }}
+}

@@ -5,7 +5,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const source=path.join(root,'../dist'),dest=path.join(root,'www');
 await rm(dest,{recursive:true,force:true});
 await mkdir(dest,{recursive:true});
-await cp(source,dest,{recursive:true});
+await cp(source,dest,{recursive:true,filter:src=>!['server','.openai'].includes(path.basename(src))});
 for(const name of ['app.js','community.mjs','social.mjs']){
  let js=await readFile(path.join(dest,name),'utf8');
  js=js.replaceAll("encodeURIComponent(location.origin+'/')","encodeURIComponent('https://family-news-app.nimbletide.chatgpt.site/')");

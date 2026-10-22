@@ -31,6 +31,29 @@ public class FamilyBrandPlugin extends Plugin {
             }catch(Exception error){call.reject("Could not update launcher icon",error);}
         });
     }
+    @PluginMethod public void getLaunchFamily(PluginCall call) {
+        Uri uri=getActivity().getIntent().getData();String code="";
+        if(uri!=null&&"familynews".equals(uri.getScheme())&&"family".equals(uri.getHost())){
+            String value=uri.getLastPathSegment();if(value!=null&&value.matches("[A-Za-z0-9-]{1,40}"))code=value;
+            getActivity().getIntent().setData(null);
+        }
+        JSObject result=new JSObject();result.put("code",code);call.resolve(result);
+    }
+    @PluginMethod public void pinFamilyShortcut(PluginCall call) {
+        if(android.os.Build.VERSION.SDK_INT<26){call.reject("هذا الجهاز لا يدعم طلب تثبيت الاختصار");return;}
+        try{
+            String code=call.getString("code",""),name=call.getString("name",""),encoded=call.getString("icon","");
+            if(!code.matches("[A-Za-z0-9-]{1,40}")||name.trim().isEmpty()||name.length()>100||encoded.length()>2000000){call.reject("بيانات الأيقونة غير صحيحة");return;}
+            byte[] raw=Base64.decode(encoded,Base64.DEFAULT);android.graphics.BitmapFactory.Options bounds=new android.graphics.BitmapFactory.Options();bounds.inJustDecodeBounds=true;android.graphics.BitmapFactory.decodeByteArray(raw,0,raw.length,bounds);
+            if(bounds.outWidth<1||bounds.outHeight<1||bounds.outWidth>1024||bounds.outHeight>1024){call.reject("أبعاد الأيقونة غير صحيحة");return;}
+            android.graphics.Bitmap bitmap=android.graphics.BitmapFactory.decodeByteArray(raw,0,raw.length);
+            android.content.pm.ShortcutManager manager=getContext().getSystemService(android.content.pm.ShortcutManager.class);
+            if(manager==null||!manager.isRequestPinShortcutSupported()){call.reject("مشغل الشاشة لا يدعم تثبيت الاختصار");return;}
+            Intent launch=new Intent(Intent.ACTION_VIEW,Uri.parse("familynews://family/"+code),getContext(),MainActivity.class);launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            android.content.pm.ShortcutInfo shortcut=new android.content.pm.ShortcutInfo.Builder(getContext(),"family-"+code.toUpperCase(java.util.Locale.ROOT)).setShortLabel(name).setLongLabel(name).setIcon(android.graphics.drawable.Icon.createWithBitmap(bitmap)).setIntent(launch).build();
+            getActivity().runOnUiThread(()->{try{manager.updateShortcuts(java.util.Collections.singletonList(shortcut));boolean requested=manager.requestPinShortcut(shortcut,null);JSObject result=new JSObject();result.put("requested",requested);call.resolve(result);}catch(Exception error){call.reject("تعذر إضافة أيقونة العائلة",error);}});
+        }catch(Exception error){call.reject("تعذر تجهيز أيقونة العائلة",error);}
+    }
     @PluginMethod public void shareExport(PluginCall call) {
         try {
             String type=call.getString("type", ""),encoded=call.getString("data", "");
