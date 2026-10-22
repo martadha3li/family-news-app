@@ -16,13 +16,14 @@ for(let i=0;i<20;i++){
 }
 const target=targets.find(t=>t.webSocketDebuggerUrl);
 if(!target)throw new Error('Native WebView did not start');
-const result=await new Promise((resolve,reject)=>{
+const inspect=()=>new Promise((resolve,reject)=>{
  const ws=new WebSocket(target.webSocketDebuggerUrl);
  const timer=setTimeout(()=>{ws.close();reject(new Error('WebView evaluation timed out'));},15000);
  ws.onopen=()=>ws.send(JSON.stringify({id:1,method:'Runtime.evaluate',params:{expression:'JSON.stringify({title:document.title,body:document.body.innerText,login:!!document.querySelector("#auth-form"),native:!!window.Capacitor,origin:location.origin})',returnByValue:true}}));
  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id!==1)return;clearTimeout(timer);ws.close();if(m.error)reject(new Error(JSON.stringify(m.error)));else resolve(JSON.parse(m.result.result.value));};
  ws.onerror=()=>{clearTimeout(timer);reject(new Error('WebView connection failed'));};
 });
+let result;for(let i=0;i<30;i++){result=await inspect();if(result.native&&result.login&&result.title==='منصة العوائل'&&result.body.includes('اختر عائلتك'))break;await delay(1000)}
 writeFileSync('smoke-evidence/launch.json',JSON.stringify(result,null,2));
 writeFileSync('smoke-evidence/logcat.txt',adb('logcat','-d','-t','2000'));
 execFileSync('adb',['shell','screencap','-p','/sdcard/launch.png']);

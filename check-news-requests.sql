@@ -1,0 +1,47 @@
+begin;
+create temp table follow_ids(kind text,id uuid);grant select on follow_ids to authenticated;
+insert into follow_ids values('tenant',gen_random_uuid()),('other_tenant',gen_random_uuid()),('writer',gen_random_uuid()),('subject',gen_random_uuid()),('fan',gen_random_uuid()),('outsider',gen_random_uuid()),('other_writer',gen_random_uuid());
+insert into family_private.tenants(id,code,name,status,contact_phone,contact_email,payment_status)select id,case kind when 'tenant'then 'FOLLOW-TEST'else 'FOLLOW-OTHER'end,'اختبار المتابعة','active','+966500007701',kind||'-follow@example.invalid','waived'from follow_ids where kind in('tenant','other_tenant');
+select set_config('request.jwt.claim.sub',(select user_id::text from family_private.platform_admins limit 1),true);
+select public.platform_action('save',jsonb_build_object('id',id,'status','active','payment_status','waived'))from follow_ids where kind in('tenant','other_tenant');
+insert into auth.users(id,aud,role,email,email_confirmed_at,raw_user_meta_data)select id,'authenticated','authenticated',kind||'-follow@example.invalid',now(),jsonb_build_object('family_code',case kind when 'outsider'then 'FOLLOW-OTHER'else 'FOLLOW-TEST'end,'full_name',kind||' احمد حسن اختبار','display_name',kind||' احمد حسن اختبار','gender','male','phone',case kind when 'writer'then '+966500007701'when 'subject'then '+966500007702'when 'fan'then '+966500007703'when 'other_writer'then '+966500007705'else '+966500007704'end)from follow_ids where kind in('writer','subject','fan','outsider','other_writer');
+update public.profiles set status='active',role=case when id in(select id from follow_ids where kind in('writer','other_writer'))then 'admin'else 'member'end where id in(select id from follow_ids);
+update public.family_settings set journalist_approval=false where tenant_id=(select id from follow_ids where kind='tenant');
+
+
+
+create temp table request_test(key text,id uuid);grant select,insert on request_test to authenticated;
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='writer'),true);
+set local role authenticated;
+insert into request_test select 'template',(public.news_request_action('template_save','{"name":"مولود جديد","kind":"newborn","body":"نهنئ {subject} بالمولود {newborn}. {details}","enabled":true}')#>>'{}')::uuid;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='fan'),true);
+set local role authenticated;
+do $$begin begin perform public.news_request_action('template_save','{"name":"غير مسموح","kind":"general","body":"{subject}"}');raise exception 'MEMBER_TEMPLATE';exception when raise_exception then if sqlerrm='MEMBER_TEMPLATE'then raise;end if;end;end$$;
+insert into request_test select 'request',(public.news_request_action('submit',jsonb_build_object('template',(select id from request_test where key='template'),'subject','أحمد علي','newborn','علي','details','قيمة حرفية {subject}'))#>>'{}')::uuid;
+do $$declare x jsonb;begin x:=public.news_request_action('list');if jsonb_array_length(x)<>1 or x->0->>'rendered_body'<>'نهنئ أحمد علي بالمولود علي. قيمة حرفية {subject}'then raise exception 'SNAPSHOT_RENDER';end if;begin perform public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request')));raise exception 'MEMBER_PUBLISHED';exception when raise_exception then if sqlerrm='MEMBER_PUBLISHED'then raise;end if;end;end$$;
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='outsider'),true);
+set local role authenticated;
+do $$begin if jsonb_array_length(public.news_request_action('list'))<>0 then raise exception 'REQUEST_LEAK';end if;end$$;
+reset role;
+update public.profiles set role='journalist'where id=(select id from follow_ids where kind='subject');
+update public.family_settings set journalist_approval=true where tenant_id=(select id from follow_ids where kind='tenant');
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='subject'),true);
+set local role authenticated;
+do $$declare x jsonb;begin if jsonb_array_length(public.news_request_action('mention_search','{"term":"0500007703"}'))<>1 then raise exception 'PHONE_MENTION_SEARCH';end if;
+begin perform public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request'),'mentions',jsonb_build_array((select id from follow_ids where kind='outsider'))));raise exception 'CROSS_MENTION';exception when raise_exception then if sqlerrm='CROSS_MENTION'then raise;end if;end;
+x:=public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request'),'mention_requester',true));if(x->>'published')::boolean then raise exception 'BYPASSED_MANAGER';end if;
+begin perform public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request')));raise exception 'DOUBLE_PUBLICATION';exception when raise_exception then if sqlerrm='DOUBLE_PUBLICATION'then raise;end if;end;
+end$$;
+reset role;
+do $$begin if not exists(select 1 from public.posts p join family_private.news_requests r on r.post_id=p.id where r.id=(select id from request_test where key='request')and p.from_request and p.moderation_status='pending'and p.mentioned_member_ids @> array[(select id from follow_ids where kind='fan')])then raise exception 'REQUEST_NEWS_FAIL';end if;end$$;
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='writer'),true);
+set local role authenticated;
+update public.posts set published=true where from_request and tenant_id=family_private.current_tenant();
+reset role;
+select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='fan'),true);
+set local role authenticated;
+do $$begin if public.news_request_action('list')->0->>'display_status'<>'published'then raise exception 'STATUS_NOT_UPDATED';end if;end$$;
+select 'PASS templates, literal snapshot substitution, member request isolation, phone mentions, cross-family protection, journalist approval and publication deduplication' result;
+rollback;

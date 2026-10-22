@@ -84,7 +84,7 @@ struct PostDestination:View {
     @State private var error=""
     var body:some View{Group{if loading{ProgressView()}else if let post=post{NotificationPost(post:post)}else{VStack{EmptyState(title:"الخبر لم يعد متاحًا",symbol:"newspaper");LoadError(text:error)}}}.navigationTitle("الخبر").navigationBarTitleDisplayMode(.inline).task(id:postID){loading=true;defer{loading=false};do{post=(try await api.table("posts",[q("select","*,profiles:profiles!posts_author_id_fkey(display_name,avatar_path),likes(count),comments(count)"),q("id","eq."+postID),q("deleted_at","is.null")])).first}catch{post=nil;self.error=api.errorText(error)}}}
 }
-struct MoreScreen:View {@EnvironmentObject private var api:Backend;@State private var logout=false;@State private var wholeTreeVisible=false;var body:some View{List{Section{Brand().frame(maxWidth:.infinity).padding(.vertical,15);Text(api.family.text("name")).font(.headline);Text("أخبارنا تجمعنا").font(.caption).foregroundStyle(.secondary)};if api.active{NavigationLink("إضافة تطبيق العائلة للشاشة الرئيسية"){FamilyInstallScreen()};HubMenu();if wholeTreeVisible || api.admin{NavigationLink("شجرة العائلة"){WholeFamilyTreeScreen()}};NavigationLink("الإشعارات"){NotificationsScreen()}};if api.writer{NavigationLink("مسوداتي"){NewsScreen(scope:.drafts)}};if api.admin{Section("إدارة العائلة"){NavigationLink("لوحة إدارة العائلة"){FamilyAdminDashboard()};NavigationLink("إدارة الأعضاء"){MembersScreen()};NavigationLink("مراجعة الأخبار"){NewsScreen(scope:.review)};NavigationLink("الأخبار المخفية"){NewsScreen(scope:.hidden)};NavigationLink("الإعلانات"){AdsAdminScreen()};NavigationLink("إعدادات العائلة والدردشة"){SettingsScreen()};NavigationLink("خيارات صلة القرابة"){KinshipAdminScreen()};NavigationLink("طلبات تغيير الجوال"){PhoneRequestsScreen()};NavigationLink("البيانات والمساحة"){StorageScreen()}}};Section{Button("الخروج من الكيان العائلي",role:.destructive){Task{await api.exitFamily()}};Button("تسجيل الخروج من الحساب فقط",role:.destructive){logout=true}}}.scrollIndicators(.hidden).navigationTitle("المزيد").task{if api.active{wholeTreeVisible=Item((try? await api.action("whole_tree","settings"))as? [String:Any] ?? [:]).flag("enabled")}}.confirmationDialog("تسجيل الخروج؟",isPresented:$logout){Button("تسجيل الخروج",role:.destructive){Task{await api.logout()}}}}}
+struct MoreScreen:View {@EnvironmentObject private var api:Backend;@State private var logout=false;@State private var wholeTreeVisible=false;var body:some View{List{Section{Brand().frame(maxWidth:.infinity).padding(.vertical,15);Text(api.family.text("name")).font(.headline);Text("أخبارنا تجمعنا").font(.caption).foregroundStyle(.secondary)};if api.active{NewsRequestMenu();NavigationLink("إضافة تطبيق العائلة للشاشة الرئيسية"){FamilyInstallScreen()};HubMenu();if wholeTreeVisible || api.admin{NavigationLink("شجرة العائلة"){WholeFamilyTreeScreen()}};NavigationLink("الإشعارات"){NotificationsScreen()}};if api.writer{NavigationLink("مسوداتي"){NewsScreen(scope:.drafts)}};if api.admin{Section("إدارة العائلة"){NavigationLink("لوحة إدارة العائلة"){FamilyAdminDashboard()};NavigationLink("إدارة الأعضاء"){MembersScreen()};NavigationLink("مراجعة الأخبار"){NewsScreen(scope:.review)};NavigationLink("الأخبار المخفية"){NewsScreen(scope:.hidden)};NavigationLink("الإعلانات"){AdsAdminScreen()};NavigationLink("إعدادات العائلة والدردشة"){SettingsScreen()};NavigationLink("خيارات صلة القرابة"){KinshipAdminScreen()};NavigationLink("طلبات تغيير الجوال"){PhoneRequestsScreen()};NavigationLink("البيانات والمساحة"){StorageScreen()}}};Section{Button("الخروج من الكيان العائلي",role:.destructive){Task{await api.exitFamily()}};Button("تسجيل الخروج من الحساب فقط",role:.destructive){logout=true}}}.scrollIndicators(.hidden).navigationTitle("المزيد").task{if api.active{wholeTreeVisible=Item((try? await api.action("whole_tree","settings"))as? [String:Any] ?? [:]).flag("enabled")}}.confirmationDialog("تسجيل الخروج؟",isPresented:$logout){Button("تسجيل الخروج",role:.destructive){Task{await api.logout()}}}}}
 struct FamilyTreeScreen:View {
     @EnvironmentObject private var api:Backend
     @State private var links:[Item]=[]
@@ -299,4 +299,140 @@ struct FamilyInstallInvitation:View {
  @EnvironmentObject private var api:Backend
  @State private var visible=false
  var body:some View{Group{if visible{HStack{NavigationLink{FamilyInstallScreen()}label:{Label("أضف أيقونة "+api.family.text("name"),systemImage:"plus.app").font(.subheadline)};Spacer();Button{visible=false;UserDefaults.standard.set(true,forKey:"family-install-offered-"+api.family.id)}label:{Image(systemName:"xmark.circle.fill").foregroundStyle(.secondary)}.accessibilityLabel("لاحقًا")}.padding(12).background(.regularMaterial)}}.task(id:api.family.id){visible=api.active && !UserDefaults.standard.bool(forKey:"family-install-offered-"+api.family.id)}}
+}
+
+func renderRequestedNews(_ pattern:String,_ fields:[String:String])->String {
+ guard let regex=try? NSRegularExpression(pattern:"\\{(subject|newborn|bride_father|details|requester)\\}")else{return pattern}
+ var output=pattern
+ for match in regex.matches(in:pattern,range:NSRange(pattern.startIndex...,in:pattern)).reversed(){
+  if let keyRange=Range(match.range(at:1),in:pattern),let range=Range(match.range,in:output){output.replaceSubrange(range,with:fields[String(pattern[keyRange])] ?? "")}
+ }
+ return output
+}
+func newsRequestStatus(_ value:String)->String {return ["pending":"بانتظار المراجعة","approved":"تم الاعتماد","published":"منشور","pending_manager":"بانتظار موافقة المدير","post_rejected":"لم يعتمد المدير النشر","rejected":"مرفوض","cancelled":"ملغى"][value] ?? value}
+struct NewsRequestMenu:View {
+ @EnvironmentObject private var api:Backend
+ @State private var meta=Item()
+ var body:some View{Section("طلبات الأخبار"){NavigationLink("طلب نشر خبر"){NewNewsRequestScreen()};NavigationLink("طلبات أخباري"){NewsRequestsScreen(review:false)};if meta.flag("writer"){NavigationLink("مراجعة طلبات الأخبار · \(meta.number("pending"))"){NewsRequestsScreen(review:true)}};if meta.flag("admin"){NavigationLink("أنواع الأخبار والصيغ الجاهزة"){NewsTemplatesScreen()}}}.task{await load()}.onReceive(Timer.publish(every:30,on:.main,in:.common).autoconnect()){_ in Task{await load()}}}
+ func load()async{if let raw=try? await api.action("news_request_action","meta")as? [String:Any]{meta=Item(raw)}}
+}
+struct RequestPreview:View {
+ let title:String
+ let text:String
+ var body:some View{VStack(spacing:16){Text(title).font(.title3.bold());Text(text).lineSpacing(8).multilineTextAlignment(.center).frame(maxWidth:.infinity)}.padding(24).background{Brand().frame(maxWidth:260).opacity(0.075)}.background(brandBlue.opacity(0.04),in:RoundedRectangle(cornerRadius:18))}
+}
+struct NewNewsRequestScreen:View {
+ @EnvironmentObject private var api:Backend
+ @State private var templates:[Item]=[]
+ @State private var selected=""
+ @State private var subject=""
+ @State private var newborn=""
+ @State private var bride=""
+ @State private var details=""
+ @State private var requestID=UUID().uuidString
+ @State private var notice=""
+ @State private var error=""
+ var template:Item{templates.first{$0.id==selected} ?? Item()}
+ var body:some View {
+  Form {
+   LoadError(text:error)
+   if templates.isEmpty{Text("لم يضف مدير العائلة أنواع الأخبار وصيغها بعد.")}
+   else {
+    Picker("عنوان الخبر / نوع الخبر",selection:$selected){ForEach(templates){t in Text(t.text("name")).tag(t.id)}}
+    TextField("اسم صاحب الخبر · المعني بالخبر",text:$subject)
+    if template.text("kind")=="newborn"{TextField("اسم المولود",text:$newborn)}
+    if template.text("kind")=="marriage"{TextField("كريمة من · اسم والد العروس",text:$bride)}
+    TextField("تفاصيل أخرى",text:$details,axis:.vertical).lineLimit(3...8)
+    Section("معاينة الخبر"){RequestPreview(title:template.text("name"),text:renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]))}
+    TaskButton(title:"إرسال الطلب للصحفيين والمدير",symbol:"paperplane") {
+     _ = try await api.action("news_request_action","submit",["request_id":requestID,"template":selected,"subject":subject,"newborn":newborn,"bride_father":bride,"details":details])
+     notice="وصل طلبك للصحفيين ومدير العائلة.";requestID=UUID().uuidString;subject="";newborn="";bride="";details=""
+    }.disabled(api.readOnly || subject.trimmingCharacters(in:.whitespaces).isEmpty)
+   }
+   if !notice.isEmpty{Text(notice).foregroundStyle(brandBlue);NavigationLink("متابعة طلباتي"){NewsRequestsScreen(review:false)}}
+  }.navigationTitle("طلب نشر خبر").task{do{templates=Item.items(try await api.action("news_request_action","templates")).filter{$0.flag("enabled")};selected=templates.first?.id ?? ""}catch{self.error=api.errorText(error)}}
+ }
+}
+struct NewsRequestsScreen:View {
+ @EnvironmentObject private var api:Backend
+ let review:Bool
+ @State private var rows:[Item]=[]
+ @State private var error=""
+ @State private var more=false
+ var body:some View{List{LoadError(text:error);ForEach(rows){r in VStack(alignment:.leading,spacing:12){Text(r.text("title")).font(.headline);Text(r.text("requester_name")+" · "+newsRequestStatus(r.text("display_status"))).font(.caption);RequestPreview(title:r.text("title"),text:r.text("rendered_body"));if !r.text("review_note").isEmpty{Text("ملاحظة المراجع: "+r.text("review_note"))};if !r.text("post_id").isEmpty{NavigationLink("فتح الخبر"){PostDestination(postID:r.text("post_id"))}};if r.text("status")=="pending"{if review{NavigationLink("مراجعة واعتماد الخبر"){NewsRequestReviewScreen(request:r)}}else{TaskButton(title:"إلغاء الطلب",symbol:"xmark"){_ = try await api.action("news_request_action","cancel",["id":r.id]);await load(reset:true)}.disabled(api.readOnly)}}}};if more{TaskButton(title:"طلبات أقدم",symbol:"arrow.down"){await load(reset:false)}};if rows.isEmpty && error.isEmpty{Text("لا توجد طلبات.")}}.navigationTitle(review ? "مراجعة طلبات الأخبار":"طلبات أخباري").task{await load(reset:true)}.refreshable{await load(reset:true)}}
+ func load(reset:Bool)async{do{let result=Item.items(try await api.action("news_request_action","list",["review":review,"offset":reset ? 0:rows.count]));if reset{rows=result}else{rows += result};more=result.count==30;error=""}catch{self.error=api.errorText(error)}}
+}
+struct NewsRequestReviewScreen:View {
+ @EnvironmentObject private var api:Backend
+ @Environment(\.dismiss)private var dismiss
+ let request:Item
+ @State private var title=""
+ @State private var text=""
+ @State private var term=""
+ @State private var results:[Item]=[]
+ @State private var chosen:[Item]=[]
+ @State private var mentionRequester=false
+ @State private var note=""
+ @State private var publishedPost=""
+ @State private var notice=""
+ @State private var finished=false
+ var body:some View {
+  Form {
+   if finished{Text(notice);if !publishedPost.isEmpty{NavigationLink("فتح الخبر"){PostDestination(postID:publishedPost)}}}
+   else {
+    Text("طالب الخبر: "+request.text("requester_name"))
+    TextField("عنوان النشر",text:$title)
+    TextField("الصيغة النهائية",text:$text,axis:.vertical).lineLimit(6...16)
+    RequestPreview(title:title,text:text)
+    Toggle("منشن مباشر لطالب الخبر",isOn:$mentionRequester)
+    Section("إضافة منشن لأعضاء العائلة") {
+     TextField("الاسم أو رقم الجوال أو @الاسم",text:$term)
+     ForEach(results){p in Button(p.text("display_name")){if !chosen.contains(where:{$0.id==p.id}) && chosen.count<20{chosen.append(p)};term="";results=[]}}
+     ForEach(chosen){p in Button("✕ "+p.text("display_name")){chosen.removeAll{$0.id==p.id}}}
+    }
+    Text("تطبق موافقة المدير على أخبار الصحفي وفق إعدادات العائلة.").font(.caption).foregroundStyle(.secondary)
+    TaskButton(title:"اعتماد وإرسال للنشر",symbol:"checkmark") {
+     let result=Item(try await api.action("news_request_action","approve",["id":request.id,"title":title,"body":text,"mention_requester":mentionRequester,"mentions":chosen.map{$0.id}])as? [String:Any] ?? [:])
+     finished=true;publishedPost=result.flag("published") ? result.text("post_id"):"";notice=result.flag("published") ? "اعتمد الخبر ونُشر.":"وصل الخبر إلى المدير للموافقة النهائية."
+    }.disabled(api.readOnly)
+    Section("رفض الطلب") {TextField("سبب الرفض (اختياري)",text:$note);TaskButton(title:"رفض الطلب",symbol:"xmark"){_ = try await api.action("news_request_action","reject",["id":request.id,"note":note]);finished=true;notice="رُفض الطلب."}.disabled(api.readOnly)}
+   }
+  }.navigationTitle("اعتماد الخبر").onAppear{title=request.text("title");text=request.text("rendered_body")}.task(id:term){do{try await Task.sleep(nanoseconds:250_000_000);let query=term.hasPrefix("@") ? String(term.dropFirst()):term;if query.isEmpty{results=[];return};let rows=Item.items(try await api.action("news_request_action","mention_search",["term":query]));try Task.checkCancellation();results=rows}catch{}}
+ }
+}
+struct NewsTemplatesScreen:View {
+ @EnvironmentObject private var api:Backend
+ @State private var rows:[Item]=[]
+ @State private var error=""
+ @State private var editing:Item?
+ var body:some View{List{LoadError(text:error);Button("إضافة نوع خبر وصيغة"){editing=Item(["id":"new"])};ForEach(rows){t in Button{editing=t}label:{VStack(alignment:.leading,spacing:8){Text(t.text("name")+(t.flag("enabled") ? "":" · موقوف")).font(.headline);Text(t.text("body")).font(.caption)}}}}.navigationTitle("أنواع الأخبار والصيغ").task{await load()}.sheet(item:$editing){t in NavigationStack{NewsTemplateEditor(template:t){await load()}}}}
+ func load()async{do{rows=Item.items(try await api.action("news_request_action","templates"));error=""}catch{self.error=api.errorText(error)}}
+}
+struct NewsTemplateEditor:View {
+ @EnvironmentObject private var api:Backend
+ @Environment(\.dismiss)private var dismiss
+ let template:Item
+ let saved:()async->Void
+ @State private var name=""
+ @State private var kind="general"
+ @State private var pattern=""
+ @State private var enabled=true
+ let fields=[("subject","اسم صاحب الخبر"),("newborn","اسم المولود"),("bride_father","كريمة من"),("details","تفاصيل أخرى"),("requester","اسم طالب الخبر")]
+ var body:some View {
+  Form {
+   TextField("عنوان الخبر بالقائمة",text:$name)
+   Picker("نوع الخبر",selection:$kind){Text("عام").tag("general");Text("مولود جديد").tag("newborn");Text("عقد قران").tag("marriage")}
+   Text("اكتب الصيغة وضع الحقول بين الأقواس في المواقع المطلوبة. أزرار الإدراج تضيف الحقل في نهاية النص ويمكن نقله.").font(.caption)
+   TextField("صيغة الخبر",text:$pattern,axis:.vertical).lineLimit(6...16)
+   ForEach(fields,id:\.0){key,label in Button("إدراج "+label){pattern += "{"+key+"}"}}
+   Toggle("إتاحة النوع للأعضاء",isOn:$enabled)
+   RequestPreview(title:name,text:renderRequestedNews(pattern,["subject":"أحمد علي","newborn":"علي","bride_father":"محمد حسن","details":"تفاصيل الخبر هنا","requester":"طالب الخبر"]))
+   TaskButton(title:"حفظ النوع والصيغة",symbol:"checkmark") {
+    var payload:[String:Any]=["name":name,"kind":kind,"body":pattern,"enabled":enabled]
+    if template.id != "new"{payload["id"]=template.id}
+    _ = try await api.action("news_request_action","template_save",payload)
+    await saved();dismiss()
+   }.disabled(api.readOnly)
+  }.navigationTitle("صيغة الخبر").toolbar{Button("إغلاق"){dismiss()}}.onAppear{name=template.text("name");kind=template.text("kind").isEmpty ? "general":template.text("kind");pattern=template.text("body").isEmpty ? "تتقدم العائلة بالتهنئة إلى {subject}\n{details}":template.text("body");enabled=template.id=="new" || template.flag("enabled")}
+ }
 }
