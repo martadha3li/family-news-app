@@ -17,6 +17,7 @@ insert into request_test select 'template',(public.news_request_action('template
 reset role;
 select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='fan'),true);
 set local role authenticated;
+do $$declare types jsonb;begin types:=public.news_request_action('templates');if jsonb_array_length(types)<>1 or types->0->>'name'<>'مولود جديد'then raise exception 'TEMPLATE_DROPDOWN_FAILED';end if;end$$;
 do $$begin begin perform public.news_request_action('template_save','{"name":"غير مسموح","kind":"general","body":"{subject}"}');raise exception 'MEMBER_TEMPLATE';exception when raise_exception then if sqlerrm='MEMBER_TEMPLATE'then raise;end if;end;end$$;
 insert into request_test select 'request',(public.news_request_action('submit',jsonb_build_object('template',(select id from request_test where key='template'),'subject','أحمد علي','newborn','علي','details','قيمة حرفية {subject}'))#>>'{}')::uuid;
 do $$declare x jsonb;begin x:=public.news_request_action('list');if jsonb_array_length(x)<>1 or x->0->>'rendered_body'<>'نهنئ أحمد علي بالمولود علي. قيمة حرفية {subject}'then raise exception 'SNAPSHOT_RENDER';end if;begin perform public.news_request_action('approve',jsonb_build_object('id',(select id from request_test where key='request')));raise exception 'MEMBER_PUBLISHED';exception when raise_exception then if sqlerrm='MEMBER_PUBLISHED'then raise;end if;end;end$$;
