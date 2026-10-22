@@ -10,7 +10,7 @@ export async function renderAlbum(post,signedImage){
  const paint=()=>{count.textContent=(current+1)+' / '+paths.length;[...dots.children].forEach((dot,i)=>dot.setAttribute('aria-pressed',String(i===current)));};
  for(const [index,path]of paths.entries()){
   const slide=document.createElement('div');slide.className='album-slide';slide.setAttribute('aria-label','الصورة '+(index+1)+' من '+paths.length);
-  const img=document.createElement('img');img.alt=(post.title||'صورة الخبر')+' — '+(index+1);img.loading='lazy';if(path===null){artwork.className='artwork-album-canvas';artwork.setAttribute('role','img');artwork.setAttribute('aria-label',post.title+' — تصميم الخبر');slide.append(artwork)}else slide.append(img);track.append(slide);
+  const img=document.createElement('img');img.alt=(post.title||'صورة الخبر')+' — '+(index+1);img.loading='lazy';if(path===null){artwork.className='artwork-album-canvas';artwork.setAttribute('role','img');artwork.setAttribute('aria-label',post.title+' — '+(post.body||''));slide.append(artwork)}else slide.append(img);track.append(slide);
   const load=async()=>{try{img.src=await signedImage(path);}catch{slide.replaceChildren(retry);}};
   const retry=document.createElement('button');retry.type='button';retry.className='secondary';retry.textContent='إعادة تحميل الصورة';retry.onclick=async()=>{slide.replaceChildren(img);await load();};img.onerror=()=>slide.replaceChildren(retry);if(path!==null)await load();
   const dot=document.createElement('button');dot.type='button';dot.setAttribute('aria-label','عرض الصورة '+(index+1));dot.onclick=()=>go(index);dots.append(dot);
