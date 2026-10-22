@@ -16,7 +16,7 @@ update family_private.tenants set code='01'where id=(select id from follow_ids w
 create temp table artwork_test(k text,v text);grant all on artwork_test to authenticated;
 select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='writer'),true);
 set local role authenticated;
-insert into artwork_test select 'template',public.news_request_action('template_save','{"name":"اختبار مولود","kind":"newborn","artwork_key":"newborn","body":"نبارك {subject} بالمولود {newborn}. {details}"}')#>>'{}';
+insert into artwork_test select 'template',public.news_request_action('template_save','{"name":"اختبار مولود","kind":"newborn","artwork_key":"newborn","artwork_layout":{"align":"center","text":{"x":410,"y":240,"width":580,"height":320},"photo":{"x":80,"y":250,"width":300,"height":380}},"body":"نبارك {subject} بالمولود {newborn}. {details}"}')#>>'{}';
 do $$declare key text;begin foreach key in array array['family','mansoura','marriage','icu','honor','ramadan','wedding','job','funeral']loop perform public.news_request_action('template_save',jsonb_build_object('name','اختبار '||key,'kind','general','artwork_key',key,'body','خبر {subject} {details}'));end loop;end$$;
 reset role;
 insert into storage.objects(bucket_id,name,metadata)select 'news-images',id::text||'/artwork-photo.jpg','{"size":1234,"mimetype":"image/jpeg"}'::jsonb from follow_ids where kind='fan';
@@ -27,9 +27,10 @@ do $$begin if public.news_request_action('list')->0->>'artwork_key'<>'newborn'th
 reset role;
 select set_config('request.jwt.claim.sub',(select id::text from follow_ids where kind='writer'),true);
 set local role authenticated;
+select public.news_request_action('template_save',jsonb_build_object('id',(select v from artwork_test where k='template'),'name','اختبار مولود','kind','newborn','body','نبارك {subject} بالمولود {newborn}. {details}','artwork_key','newborn','artwork_layout',jsonb_build_object('align','left','text',jsonb_build_object('x',100,'y',200,'width',800,'height',300),'photo',jsonb_build_object('x',70,'y',225,'width',300,'height',400))));
 select public.news_request_action('claim',jsonb_build_object('id',(select v from artwork_test where k='request')));
 insert into artwork_test select 'post',public.news_request_action('approve',jsonb_build_object('id',(select v from artwork_test where k='request')))->>'post_id';
-do $$begin if not exists(select 1 from public.posts where id=(select v::bigint from artwork_test where k='post')and news_artwork='newborn'and artwork_smart_crop and artwork_only and artwork_face @> '{"x":0.5,"width":0.15}'::jsonb and image_paths=array[(select id::text||'/artwork-photo.jpg'from follow_ids where kind='fan')])then raise exception 'ARTWORK_ORIGINAL_OPT_OUT_LOST';end if;end$$;
+do $$begin if not exists(select 1 from public.posts where id=(select v::bigint from artwork_test where k='post')and news_artwork='newborn'and artwork_layout->>'align'='center'and(artwork_layout->'text'->>'x')::int=410 and artwork_smart_crop and artwork_only and artwork_face @> '{"x":0.5,"width":0.15}'::jsonb and image_paths=array[(select id::text||'/artwork-photo.jpg'from follow_ids where kind='fan')])then raise exception 'ARTWORK_ORIGINAL_OPT_OUT_LOST';end if;end$$;
 insert into public.posts(author_id,title,body,published)values(auth.uid(),'ترقية أحمد','تفاصيل الترقية',true);
 do $$begin if not exists(select 1 from public.posts where author_id=auth.uid()and title='ترقية أحمد'and news_artwork='promotion')then raise exception 'TITLE_MAP_FAILED';end if;end$$;
 reset role;

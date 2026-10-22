@@ -356,7 +356,7 @@ struct NewNewsRequestScreen:View {
      if processingPhotos{ProgressView("تجهيز الصور…")}
      ForEach(requestPhotos){p in VStack{if p.id==requestPhotos.first?.id && smartPhoto{NativeFacePicker(data:p.original,selected:Binding(get:{requestPhotos.first?.selectedFace},set:{face in if !requestPhotos.isEmpty{requestPhotos[0].selectedFace=face;Task{await reprocessRequestPhotos()}}}))};if let image=UIImage(data:p.prepared){Image(uiImage:image).resizable().scaledToFit().frame(maxHeight:260)};Text(p.cropped ? "تم القص حول الوجه":"الصورة كاملة").font(.caption);Button("إزالة الصورة"){requestPhotos.removeAll{$0.id==p.id}}.disabled(processingPhotos)}}
     }
-    Section("معاينة الخبر"){RequestPreview(title:template.text("name"),text:renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]));NewsArtworkPreview(post:Item(["news_artwork":template.text("artwork_key"),"title":template.text("name"),"body":renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]),"artwork_smart_crop":smartPhoto,"artwork_only":artworkOnly,"artwork_face":faceDictionary(requestPhotos.first?.selectedFace)]),photo:requestPhotos.first.flatMap{UIImage(data:$0.original)})}
+    Section("معاينة الخبر"){RequestPreview(title:template.text("name"),text:renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]));NewsArtworkPreview(post:Item(["news_artwork":template.text("artwork_key"),"title":template.text("name"),"body":renderRequestedNews(template.text("body"),["subject":subject,"newborn":newborn,"bride_father":bride,"details":details,"requester":api.profile.text("display_name")]),"artwork_layout":template.child("artwork_layout").raw,"artwork_smart_crop":smartPhoto,"artwork_only":artworkOnly,"artwork_face":faceDictionary(requestPhotos.first?.selectedFace)]),photo:requestPhotos.first.flatMap{UIImage(data:$0.original)})}
     TaskButton(title:"إرسال الطلب للصحفيين والمدير",symbol:"paperplane") {
      guard !processingPhotos else{throw FamilyError(text:"انتظر تجهيز الصور.")};if smartPhoto,let first=requestPhotos.first,first.faces.count>1,first.selectedFace==nil{throw FamilyError(text:"اختر وجه الشخص المقصود أو أوقف القص الذكي.")}
      var paths:[String]=[]
@@ -446,6 +446,7 @@ struct NewsTemplateEditor:View {
  let saved:()async->Void
  @State private var name=""
  @State private var artwork=""
+ @State private var artworkLayout:[String:Any]=[:]
  @State private var kind="general"
  @State private var pattern=""
  @State private var templateSelection=NSRange(location:0,length:0)
@@ -458,15 +459,15 @@ struct NewsTemplateEditor:View {
    Text("٢. اكتب الصيغة واضغط موضع ظهور بيانات الطلب، ثم اختر الحقل أدناه لإدراجه في نفس المكان.").font(.subheadline)
    TemplatePatternEditor(text:$pattern,selection:$templateSelection).frame(minHeight:190).accessibilityLabel("صياغة الخبر وتحديد مواضع البيانات")
    Section("٣. إدراج بيانات الطلب عند المؤشر"){ForEach(fields,id:\.0){key,label in Button("＋ "+label){insertField(key)}}}
-   Toggle("إتاحة النوع للأعضاء",isOn:$enabled)
+   Toggle("إتاحة النوع للأعضاء",isOn:$enabled);if !artwork.isEmpty{NativeArtworkLayoutEditor(key:artwork,layout:$artworkLayout);NewsArtworkPreview(post:Item(["news_artwork":artwork,"title":name,"body":renderRequestedNews(pattern,["subject":"أحمد علي","newborn":"علي","bride_father":"محمد حسن","details":"تفاصيل الخبر هنا","requester":"طالب الخبر"]),"artwork_layout":artworkLayout.isEmpty ? defaultArtworkLayout(artwork):artworkLayout]),photo:UIImage(systemName:"person.fill"))}
    RequestPreview(title:name,text:renderRequestedNews(pattern,["subject":"أحمد علي","newborn":"علي","bride_father":"محمد حسن","details":"تفاصيل الخبر هنا","requester":"طالب الخبر"]))
    TaskButton(title:"حفظ وإضافة النوع لقائمة الأخبار",symbol:"checkmark") {
-    var payload:[String:Any]=["name":name,"kind":kind,"body":pattern,"enabled":enabled,"artwork_key":artwork.isEmpty ? NSNull():artwork as Any]
+    var payload:[String:Any]=["name":name,"kind":kind,"body":pattern,"enabled":enabled,"artwork_key":artwork.isEmpty ? NSNull():artwork as Any,"artwork_layout":artwork.isEmpty ? NSNull():(artworkLayout.isEmpty ? defaultArtworkLayout(artwork):artworkLayout)as Any]
     if template.id != "new"{payload["id"]=template.id}
     _ = try await api.action("news_request_action","template_save",payload)
     await saved();dismiss()
    }.disabled(api.readOnly)
-  }.navigationTitle("نوع الخبر وصياغته").toolbar{Button("إغلاق"){dismiss()}}.onAppear{artwork=template.text("artwork_key");name=template.text("name");kind=template.text("kind").isEmpty ? "general":template.text("kind");pattern=template.text("body").isEmpty ? "تتقدم العائلة بالتهنئة إلى {subject}\n{details}":template.text("body");enabled=template.id=="new" || template.flag("enabled")}
+  }.navigationTitle("نوع الخبر وصياغته").toolbar{Button("إغلاق"){dismiss()}}.onAppear{artworkLayout=template.child("artwork_layout").raw;artwork=template.text("artwork_key");name=template.text("name");kind=template.text("kind").isEmpty ? "general":template.text("kind");pattern=template.text("body").isEmpty ? "تتقدم العائلة بالتهنئة إلى {subject}\n{details}":template.text("body");enabled=template.id=="new" || template.flag("enabled")}
  }
  func insertField(_ key:String){let value=NSMutableString(string:pattern);let start=min(max(0,templateSelection.location),value.length);let length=min(max(0,templateSelection.length),value.length-start);let token="{"+key+"}";value.replaceCharacters(in:NSRange(location:start,length:length),with:token);pattern=value as String;templateSelection=NSRange(location:start+(token as NSString).length,length:0)}
 

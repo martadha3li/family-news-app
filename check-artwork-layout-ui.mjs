@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+const {JSDOM}=await import(process.env.FAMILY_UI_TEST_MODULE||'jsdom');
+const {window}=new JSDOM('<body></body>');globalThis.document=window.document;
+const E=(tag,text,cls)=>{const n=document.createElement(tag);if(text)n.textContent=text;if(cls)n.className=cls;return n},B=(label,fn,cls)=>{const n=E('button',label,cls);n.onclick=fn;return n};
+const {layoutEditor}=await import('./dist/artwork-layout-editor.mjs');let changes=0;
+const editor=layoutEditor({element:E,button:B,key:'family',onChange:()=>changes++});document.body.append(editor.element);
+editor.element.querySelector('[data-align=center]').click();assert.equal(editor.value.align,'center');
+const fields=editor.element.querySelectorAll('input');fields[0].value='123';fields[0].oninput();assert.equal(editor.value.text.x,123);
+const region=editor.element.querySelector('.layout-photo'),board=editor.element.querySelector('.artwork-layout-board');board.getBoundingClientRect=()=>({width:540});const old=editor.value.photo.x;
+region.onpointerdown({button:0,clientX:0,clientY:0,preventDefault(){}});region.onpointermove({clientX:10,clientY:0});region.onpointerup();assert.equal(editor.value.photo.x,old+20);
+fields[6].value='2000';fields[6].oninput();assert.equal(editor.value.photo.width,1080);assert.equal(editor.value.photo.x,0);
+const saved=editor.value;const restored=layoutEditor({element:E,button:B,key:'family',value:saved});assert.deepEqual(restored.value,saved);
+saved.align='left';assert.equal(editor.value.align,'center');editor.updateKey('');assert.equal(editor.element.hidden,true);assert.ok(changes>=4);
+console.log('PASS alignment, numeric positioning, proportional dragging, bounds and saved layout restoration.');
