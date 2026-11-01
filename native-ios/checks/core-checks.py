@@ -60,17 +60,17 @@ print('PASS: no web runtime, no privileged key, protected local session, no priv
 news=(root/'App/News.swift').read_text()
 alerts=(root/'App/Notifications.swift').read_text()
 assert 'maxSelectionCount:5-album.count' in news
-assert 'aspectRatio(4.0/5.0' in news and '.tabViewStyle(.page' in news
+assert 'aspectRatio(1,contentMode:.fit)' in news and '.tabViewStyle(.page' in news
 assert 'safeAreaInset(edge:.top' in news and 'AnnouncementTabs' in news
 assert 'registerForRemoteNotifications' not in alerts
 assert 'removeAllDeliveredNotifications' in alerts and 'owner==identity' in alerts
 print('PASS: album compatibility, five-photo limit, fixed carousel, pinned announcements, notification privacy and free signing')
 
-assert 'sheet(isPresented:$comments)' not in news
+assert 'sheet(isPresented:$comments)' in news
 assert 'InlineComments(post:post' in news and '.frame(height:64)' in news
 assert 'MentionEditor' in news and 'mention_search' in news
 assert plist['CFBundleShortVersionString']=='$(MARKETING_VERSION)'
-print('PASS: inline comments, bounded ad bar, mention caret and dynamic build version')
+print('PASS: modal comments, bounded ad bar, mention caret and dynamic build version')
 
 app=(root/'App/FamilyNewsApp.swift').read_text()
 assert plist.get('NSFaceIDUsageDescription')

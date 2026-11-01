@@ -96,6 +96,6 @@ struct NotificationPost:View {
     @State var post:Item
     @State private var edit=false
     @State private var error=""
-    var body:some View{ScrollView{LoadError(text:error);if !post.id.isEmpty{NativePost(post:post,edit:{edit=true},refresh:{await reload()},scope:.published)}}.scrollIndicators(.hidden).navigationTitle("الخبر").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.sheet(isPresented:$edit){NavigationStack{PostEditor(post:post){await reload()}}}}
+    var body:some View{ScrollView{LoadError(text:error);if !post.id.isEmpty{NativePost(post:post,edit:{edit=true},refresh:{await reload()},scope:.published,compact:false)}}.scrollIndicators(.hidden).navigationTitle("الخبر").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.cancellationAction){Button("إغلاق"){dismiss()}}}.sheet(isPresented:$edit){NavigationStack{PostEditor(post:post){await reload()}}}}
     func reload()async{do{let rows=try await api.table("posts",[q("select","*,profiles:profiles!posts_author_id_fkey(display_name,avatar_path),likes(count),comments(count)"),q("id","eq."+post.id)]);post=rows.first ?? Item()}catch{post=Item();self.error=api.errorText(error)}}
 }
