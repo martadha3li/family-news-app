@@ -66,11 +66,11 @@ assert 'registerForRemoteNotifications' not in alerts
 assert 'removeAllDeliveredNotifications' in alerts and 'owner==identity' in alerts
 print('PASS: album compatibility, five-photo limit, fixed carousel, pinned announcements, notification privacy and free signing')
 
-assert 'sheet(isPresented:$comments)' in news
+assert 'sheet(isPresented:$comments)' not in news
 assert 'InlineComments(post:post' in news and '.frame(height:64)' in news
 assert 'MentionEditor' in news and 'mention_search' in news
 assert plist['CFBundleShortVersionString']=='$(MARKETING_VERSION)'
-print('PASS: modal comments, bounded ad bar, mention caret and dynamic build version')
+print('PASS: expanding comments, bounded ad bar, mention caret and dynamic build version')
 
 app=(root/'App/FamilyNewsApp.swift').read_text()
 assert plist.get('NSFaceIDUsageDescription')
